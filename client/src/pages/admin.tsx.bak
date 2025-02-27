@@ -1,0 +1,330 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useCallback } from "react";
+{{ ... }}
+
+export default function AdminDashboard() {
+  const [search, setSearch] = useState("");
+  const [profilePicture, setProfilePicture] = useState<File | null>(null);
+  const [selectedCreatorId, setSelectedCreatorId] = useState<number | null>(null);
+  const [selectedCreatorName, setSelectedCreatorName] = useState<string | null>(null);
+  const [viewingContent, setViewingContent] = useState(false);
+  const [uploadFormData, setUploadFormData] = useState<UploadFormData>({
+    title: '',
+    description: '',
+    tags: '',
+    instagram: '',
+    tiktok: '',
+    twitter: '',
+    onlyfans: '',
+    file: null,
+    contentRating: 'sfw',
+    isPremium: false
+  });
+  const [premiumPrice, setPremiumPrice] = useState("19.99");
+  const [isPremiumActive, setIsPremiumActive] = useState(true);
+  const [isAddingPlan, setIsAddingPlan] = useState(false);
+  const [newPlanName, setNewPlanName] = useState("");
+  const [newPlanPrice, setNewPlanPrice] = useState("");
+  const [newPlanActive, setNewPlanActive] = useState(true);
+  const queryClient = useQueryClient();
+
+  // Add query to fetch subscription plans
+  const { data: subscriptionPlans, isLoading: plansLoading } = useQuery({
+    queryKey: ["subscriptionPlans"],
+    queryFn: async () => {
+      // In a real app, you'd fetch this from an API endpoint
+      // For now, we'll use a mock response
+      return [
+        {
+          name: "premium",
+          price: 19.99,
+          isActive: true
+        }
+      ];
+    },
+    onSuccess: (data) => {
+      if (data && data.length > 0) {
+        const premiumPlan = data.find(plan => plan.name === "premium");
+        if (premiumPlan) {
+          setPremiumPrice(premiumPlan.price.toString());
+          setIsPremiumActive(premiumPlan.isActive);
+        }
+      }
+    }
+  });
+
+  // Add mutation to update subscription plan
+  const updatePlanMutation = useMutation({
+    mutationFn: async ({ planName, price, isActive }) => {
+      const response = await fetch("/api/subscriptions/plans/update", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          planName,
+          price: parseFloat(price),
+          isActive,
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to update plan");
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["subscriptionPlans"] });
+      // toast({
+      //   title: "Success",
+      //   description: "Subscription plan updated successfully",
+      // });
+    },
+    onError: (error) => {
+      // toast({
+      //   title: "Error",
+      //   description: error.message || "Failed to update plan",
+      //   variant: "destructive",
+      // });
+    },
+  });
+
+  // Add mutation to create new subscription plan
+  const addPlanMutation = useMutation({
+    mutationFn: async ({ name, price, isActive }) => {
+      const response = await fetch("/api/subscriptions/plans/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          price: parseFloat(price),
+          isActive,
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to create plan");
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["subscriptionPlans"] });
+      setIsAddingPlan(false);
+      setNewPlanName("");
+      setNewPlanPrice("");
+      setNewPlanActive(true);
+      // toast({
+      //   title: "Success",
+      //   description: "New subscription plan created successfully",
+      // });
+    },
+    onError: (error) => {
+      // toast({
+      //   title: "Error",
+      //   description: error.message || "Failed to create plan",
+      //   variant: "destructive",
+      // });
+    },
+  });
+
+  const handleUpdatePremiumPlan = () => {
+    updatePlanMutation.mutate({
+      planName: "premium",
+      price: premiumPrice,
+      isActive: isPremiumActive,
+    });
+  };
+
+  const handleAddNewPlan = () => {
+    if (!newPlanName || !newPlanPrice) {
+      // toast({
+      //   title: "Error",
+      //   description: "Plan name and price are required",
+      //   variant: "destructive",
+      // });
+      return;
+    }
+
+    addPlanMutation.mutate({
+      name: newPlanName,
+      price: newPlanPrice,
+      isActive: newPlanActive,
+    });
+  };
+
+  {{ ... }}
+
+  return (
+    <div className="container mx-auto p-6 min-h-screen">
+      {{ ... }}
+
+      <TabsContent value="settings">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Site Settings</CardTitle>
+              <CardDescription>Configure your site information</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="siteName">Site Name</Label>
+                <Input id="siteName" defaultValue="Babes Espresso" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="siteDescription">Site Description</Label>
+                <Input id="siteDescription" defaultValue="Premium content from your favorite baristas" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="contactEmail">Contact Email</Label>
+                <Input id="contactEmail" defaultValue="contact@babesespresso.com" type="email" />
+              </div>
+              <Button className="mt-2">Save Changes</Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Social Media</CardTitle>
+              <CardDescription>Manage your social media links</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="instagram">Instagram</Label>
+                <Input id="instagram" defaultValue="@babesespresso" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="twitter">Twitter</Label>
+                <Input id="twitter" defaultValue="@babesespresso" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tiktok">TikTok</Label>
+                <Input id="tiktok" defaultValue="@babesespresso" />
+              </div>
+              <Button className="mt-2">Save Changes</Button>
+            </CardContent>
+          </Card>
+
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <CardTitle>Subscription Settings</CardTitle>
+              <CardDescription>Configure your subscription plans</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="border rounded-lg p-4">
+                  <h3 className="text-lg font-semibold mb-2">Premium Plan</h3>
+                  <div className="space-y-2 mb-4">
+                    <div className="flex justify-between">
+                      <span>Price</span>
+                      <div className="flex items-center gap-2">
+                        <span>$</span>
+                        <Input 
+                          className="w-20" 
+                          value={premiumPrice}
+                          onChange={(e) => setPremiumPrice(e.target.value)}
+                        />
+                        <span>/month</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span>Active</span>
+                      <input
+                        type="checkbox"
+                        checked={isPremiumActive}
+                        onChange={(e) => setIsPremiumActive(e.target.checked)}
+                        className="text-primary"
+                      />
+                    </div>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full"
+                    onClick={handleUpdatePremiumPlan}
+                    disabled={updatePlanMutation.isPending}
+                  >
+                    {updatePlanMutation.isPending ? "Updating..." : "Update Plan"}
+                  </Button>
+                </div>
+                
+                {isAddingPlan ? (
+                  <div className="border rounded-lg p-4">
+                    <h3 className="text-lg font-semibold mb-2">New Plan</h3>
+                    <div className="space-y-2 mb-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="planName">Plan Name</Label>
+                        <Input 
+                          id="planName" 
+                          value={newPlanName}
+                          onChange={(e) => setNewPlanName(e.target.value)}
+                          placeholder="e.g. Basic, Premium Plus"
+                        />
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Price</span>
+                        <div className="flex items-center gap-2">
+                          <span>$</span>
+                          <Input 
+                            className="w-20" 
+                            value={newPlanPrice}
+                            onChange={(e) => setNewPlanPrice(e.target.value)}
+                          />
+                          <span>/month</span>
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span>Active</span>
+                        <input
+                          type="checkbox"
+                          checked={newPlanActive}
+                          onChange={(e) => setNewPlanActive(e.target.checked)}
+                          className="text-primary"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="w-full"
+                        onClick={() => setIsAddingPlan(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button 
+                        variant="default" 
+                        size="sm" 
+                        className="w-full"
+                        onClick={handleAddNewPlan}
+                        disabled={addPlanMutation.isPending}
+                      >
+                        {addPlanMutation.isPending ? "Creating..." : "Create Plan"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border rounded-lg p-4 border-dashed flex flex-col justify-center items-center text-center">
+                    <h3 className="text-lg font-semibold mb-2">Add New Plan</h3>
+                    <p className="text-muted-foreground text-sm mb-4">Create a new subscription plan for your users</p>
+                    <Button 
+                      variant="outline"
+                      onClick={() => setIsAddingPlan(true)}
+                    >
+                      Add Plan
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+    </div>
+  );
+}

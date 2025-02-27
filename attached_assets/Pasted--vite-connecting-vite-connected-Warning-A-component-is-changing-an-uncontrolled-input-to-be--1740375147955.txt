@@ -1,0 +1,25 @@
+[vite] connecting...
+[vite] connected.
+Warning: A component is changing an uncontrolled input to be controlled. This is likely caused by the value changing from undefined to a defined value, which should not happen. Decide between using a controlled or uncontrolled input element for the lifetime of the component. More info: https://reactjs.org/link/controlled-components
+    at input
+    at _c (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/src/components/ui/input.tsx:20:11)
+    at https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-UACHJROW.js?v=ce1359df:52:11
+    at https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-UACHJROW.js?v=ce1359df:33:11
+    at https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/src/components/ui/form.tsx:129:9
+    at div
+    at https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/src/components/ui/form.tsx:71:6
+    at Controller (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-YABUFNLM.js?v=ce1359df:313:35)
+    at FormField (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/src/components/ui/form.tsx:32:6)
+    at form
+    at FormProvider (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-YABUFNLM.js?v=ce1359df:102:11)
+    at div
+    at _c9 (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/src/components/ui/card.tsx:114:12)
+    at div
+    at _c (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/src/components/ui/card.tsx:20:11)
+    at div
+    at AuthPage (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/src/pages/auth.tsx:37:27)
+    at Route (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=ce1359df:323:16)
+    at Switch (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=ce1359df:379:17)
+    at Router
+    at QueryClientProvider (https://6f879f66-038f-42dd-995a-b826b01f2410-00-35s409jbekrc1.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=ce1359df:2805:3)
+    at App
