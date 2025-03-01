@@ -1,8 +1,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { insertModelSchema, type InsertModel } from "@/../../shared/schema";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "../lib/queryClient";
+import { API_BASE_URL } from '@/lib/config';
+import { apiRequest } from '@/lib/api';
 import { useToast } from "../hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "../components/ui/form";
@@ -13,6 +13,7 @@ import { ImageUpload } from "../components/ui/image-upload";
 import { Link } from "react-router-dom"; 
 import logo from "/logo.png";
 import { ChevronLeft } from "lucide-react";
+import { useState } from 'react';
 
 const SOCIAL_PLATFORMS = [
   "Instagram",
@@ -35,68 +36,93 @@ export default function ModelIntake() {
   const form = useForm<InsertModel>({
     resolver: zodResolver(insertModelSchema),
     defaultValues: {
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      dateOfBirth: '',
+      aliasName: '',
       socialPlatforms: [],
+      socialHandles: '',
+      onlyFansLink: '',
       termsAccepted: [false, false],
+      bodyPhoto: undefined,
+      licensePhoto: undefined,
     },
   });
 
-  const mutation = useMutation({
-    mutationFn: async (data: InsertModel) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [isSubmitSuccess, setIsSubmitSuccess] = useState(false);
+
+  const onSubmit = async (data: InsertModel) => {
+    setIsSubmitting(true);
+    setSubmissionError(null);
+    setIsSubmitSuccess(false);
+    
+    try {
       const formData = new FormData();
 
       // Handle date
-      const dateOfBirth = data.dateOfBirth instanceof Date 
-        ? data.dateOfBirth.toISOString().split('T')[0]
-        : data.dateOfBirth;
+      const dateOfBirth = data.dateOfBirth;
+      formData.append('dateOfBirth', dateOfBirth);
 
-      // Add files
-      if (data.bodyPhoto && data.bodyPhoto instanceof File) {
-        formData.append('bodyPhoto', data.bodyPhoto);
-      }
-      if (data.licensePhoto && data.licensePhoto instanceof File) {
-        formData.append('licensePhoto', data.licensePhoto);
-      }
-
-      // Add other fields
+      // Handle text fields
       formData.append('firstName', data.firstName);
       formData.append('lastName', data.lastName);
       formData.append('email', data.email);
       formData.append('phone', data.phone);
-      formData.append('dateOfBirth', dateOfBirth);
       formData.append('aliasName', data.aliasName || '');
+
+      // Handle files
+      if (data.bodyPhoto && data.bodyPhoto.length > 0) {
+        formData.append('bodyPhoto', data.bodyPhoto[0]);
+      }
+
+      if (data.licensePhoto && data.licensePhoto.length > 0) {
+        formData.append('licensePhoto', data.licensePhoto[0]);
+      }
+
+      // Handle arrays and objects
       formData.append('socialPlatforms', JSON.stringify(data.socialPlatforms || []));
       formData.append('socialHandles', data.socialHandles || '');
       formData.append('onlyFansLink', data.onlyFansLink || '');
       formData.append('termsAccepted', JSON.stringify(data.termsAccepted || []));
 
-      const response = await fetch('/api/models', {
+      // Submit the form data
+      console.log('Submitting model application...');
+      await apiRequest('/api/model-application', {
         method: 'POST',
         body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error);
-      }
-
-      return response.json();
-    },
-    onSuccess: () => {
+        headers: {
+          // Don't set Content-Type here, it will be set automatically for FormData
+        }
+      }, 20000); // 20 second timeout for uploads
+      
+      console.log('Model application submitted successfully');
+      
+      // Show success message and reset form
+      setIsSubmitSuccess(true);
       toast({
         title: "Success!",
         description: "Your application has been submitted.",
       });
       form.reset();
-    },
-    onError: (error) => {
-      console.error('Submission error:', error);
+      
+    } catch (error) {
+      console.error('Error submitting model application:', error);
+      setSubmissionError(error instanceof Error ? error.message : 'Unknown error');
       toast({
         title: "Error",
-        description: "Failed to submit application. Please try again.",
+        description: error instanceof Error 
+          ? error.message 
+          : "Failed to submit application. Please try again.",
         variant: "destructive",
       });
-    },
-  });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background py-8 px-4 relative">
@@ -121,7 +147,7 @@ export default function ModelIntake() {
         <CardContent>
           <Form {...form}>
             <form
-              onSubmit={form.handleSubmit((data) => mutation.mutate(data))}
+              onSubmit={form.handleSubmit(onSubmit)}
               className="space-y-6"
               encType="multipart/form-data"
             >
@@ -160,7 +186,7 @@ export default function ModelIntake() {
                     <FormItem>
                       <FormLabel>Email</FormLabel>
                       <FormControl>
-                        <Input type="email" {...field} />
+                        <Input type="email" {...field} value={field.value || ''} />
                       </FormControl>
                     </FormItem>
                   )}
@@ -172,7 +198,7 @@ export default function ModelIntake() {
                     <FormItem>
                       <FormLabel>Phone</FormLabel>
                       <FormControl>
-                        <Input type="tel" {...field} />
+                        <Input type="tel" {...field} value={field.value || ''} />
                       </FormControl>
                     </FormItem>
                   )}
@@ -187,7 +213,7 @@ export default function ModelIntake() {
                     <FormItem>
                       <FormLabel>Date of Birth</FormLabel>
                       <FormControl>
-                        <Input type="date" {...field} />
+                        <Input type="date" {...field} value={field.value ? (typeof field.value === 'string' ? field.value : field.value.toISOString().split('T')[0]) : ''} />
                       </FormControl>
                     </FormItem>
                   )}
@@ -199,7 +225,7 @@ export default function ModelIntake() {
                     <FormItem>
                       <FormLabel>Alias Model Name</FormLabel>
                       <FormControl>
-                        <Input placeholder="Mercedes" {...field} />
+                        <Input placeholder="Mercedes" {...field} value={field.value || ''} />
                       </FormControl>
                     </FormItem>
                   )}
@@ -250,7 +276,7 @@ export default function ModelIntake() {
                   <FormItem>
                     <FormLabel>Social Media Handles</FormLabel>
                     <FormControl>
-                      <Input placeholder="@tag" {...field} />
+                      <Input placeholder="@tag" {...field} value={field.value || ''} />
                     </FormControl>
                   </FormItem>
                 )}
@@ -263,7 +289,7 @@ export default function ModelIntake() {
                   <FormItem>
                     <FormLabel>OnlyFans Link (or similar)</FormLabel>
                     <FormControl>
-                      <Input placeholder="https://example.com" {...field} />
+                      <Input placeholder="https://example.com" {...field} value={field.value || ''} />
                     </FormControl>
                   </FormItem>
                 )}
@@ -349,9 +375,9 @@ export default function ModelIntake() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={mutation.isPending}
+                disabled={isSubmitting}
               >
-                {mutation.isPending ? "Submitting..." : "Submit Application"}
+                {isSubmitting ? "Submitting..." : "Submit Application"}
               </Button>
             </form>
           </Form>

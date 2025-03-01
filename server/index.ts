@@ -7,17 +7,46 @@ import { db, initializeDatabase } from "./db";
 import { users } from "../shared/schema";
 import { eq } from "drizzle-orm";
 import { hashPassword } from "./auth";
-import cors from 'cors';
+import { createServer } from 'http';
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Enable CORS for development
-app.use(cors({
-  origin: ['http://localhost:3003', 'http://localhost:3002', 'http://localhost:3001', 'http://localhost:3004'],
-  credentials: true
-}));
+// Custom CORS middleware to ensure credentials are properly handled
+app.use((req, res, next) => {
+  const allowedOrigins = [
+    'http://localhost:3001', 
+    'http://localhost:3002', 
+    'http://localhost:3003', 
+    'http://localhost:3004',
+    'http://localhost:3005',
+    'http://localhost:3006',
+    'http://localhost:3007',
+    'http://localhost:3008',
+    'http://localhost:3009',
+    'http://localhost:3010',
+    'http://localhost:3011',
+    'http://localhost:3012'
+  ];
+  
+  const origin = req.headers.origin;
+  
+  // Check if the origin is in our allowed list
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, cache-control');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  
+  next();
+});
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -70,7 +99,7 @@ app.use((req, res, next) => {
     await setupVite(app, server);
   } else {
     // Serve static files in production
-    app.use(express.static(path.join(process.cwd(), "client/dist")));
+    app.use(express.static(path.join(process.cwd(), "../client/dist")));
     app.use('/uploads', express.static(path.join(process.cwd(), "uploads"), {
       setHeaders: (res) => {
         res.setHeader('Cache-Control', 'no-cache');
@@ -100,52 +129,109 @@ app.use((req, res, next) => {
   });
 
   // Handle client-side routing - must be after API routes
+  app.get("/test", (_req: Request, res: Response) => {
+    res.sendFile(path.join(process.cwd(), "test.html"));
+  });
+  
+  app.get("/", (_req: Request, res: Response) => {
+    res.sendFile(path.join(process.cwd(), "test.html"));
+  });
+  
   app.get("*", (_req: Request, res: Response) => {
-    res.sendFile(path.join(process.cwd(), "client/dist/index.html"));
+    res.sendFile(path.join(process.cwd(), "../client/dist/index.html"));
   });
 
   try {
-    // Initialize database and create admin user
-    await initializeDatabase();
+    // Start the server
+    (async () => {
+      try {
+        // Initialize the database first
+        console.log('Initializing database...');
+        await initializeDatabase();
+        console.log('Database initialized successfully');
+        
+        // Create server instance
+        const server = createServer(app);
+        
+        // Start server with port fallback
+        const tryStartServer = async (port: number, maxRetries = 3, retryCount = 0) => {
+          try {
+            server.listen({
+              port,
+              host: "0.0.0.0",
+            }, () => {
+              log(`Server listening on port ${port}`);
+            });
+          } catch (err) {
+            if (err.code === 'EADDRINUSE' && retryCount < maxRetries) {
+              console.warn(`Port ${port} is in use, trying port ${port + 1}...`);
+              await tryStartServer(port + 1, maxRetries, retryCount + 1);
+            } else {
+              console.error('Server error:', err);
+              process.exit(1);
+            }
+          }
+        };
 
-    // Start server
-    const PORT = process.env.PORT || 3003;
-    server.listen({
-      port: PORT,
-      host: "0.0.0.0",
-      reusePort: true,
-    }, () => {
-      log(`serving on port ${PORT}`);
-    });
-    
-    // Add proper error handling for the server
-    server.on('error', (error) => {
-      console.error('Server error:', error);
-      process.exit(1);
-    });
-    
-    // Handle process termination signals
-    process.on('SIGINT', () => {
-      console.log('Received SIGINT. Shutting down gracefully...');
-      server.close(() => {
-        console.log('Server closed. Exiting process.');
-        process.exit(0);
-      });
-    });
-    
-    process.on('SIGTERM', () => {
-      console.log('Received SIGTERM. Shutting down gracefully...');
-      server.close(() => {
-        console.log('Server closed. Exiting process.');
-        process.exit(0);
-      });
-    });
-    
-    // Handle unhandled promise rejections
-    process.on('unhandledRejection', (reason, promise) => {
-      console.error('Unhandled Promise Rejection:', reason);
-      // Don't exit the process, just log the error
-    });
+        const PORT = parseInt(process.env.PORT || '3012', 10);
+        await tryStartServer(PORT);
+        
+        // Add proper error handling for the server
+        server.on('error', (error: any) => {
+          if (error.code === 'EADDRINUSE') {
+            console.error(`Port ${PORT} is already in use. Please use a different port.`);
+            // Close the database connection before exiting
+            console.log('Closing SQLite database connection...');
+            console.log('Database connection closed');
+            process.exit(1);
+          } else {
+            console.error('Server error:', error);
+            // Close the database connection before exiting
+            console.log('Closing SQLite database connection...');
+            console.log('Database connection closed');
+            process.exit(1);
+          }
+        });
+        
+        // Handle process termination signals
+        const gracefulShutdown = () => {
+          console.log('Closing SQLite database connection...');
+          try {
+            // Close the database connection if it exists
+            // For SQLite3 direct connection, we don't need to call $disconnect
+            // The connection is closed after each query
+            console.log('Database connection closed');
+          } catch (err) {
+            console.error('Error closing database connection:', err);
+          }
+          
+          server.close(() => {
+            console.log('Server closed');
+            process.exit(0);
+          });
+        };
+        
+        process.on('SIGINT', () => {
+          console.log('Received SIGINT. Shutting down gracefully...');
+          gracefulShutdown();
+        });
+        
+        process.on('SIGTERM', () => {
+          console.log('Received SIGTERM. Shutting down gracefully...');
+          gracefulShutdown();
+        });
+        
+        // Handle unhandled promise rejections
+        process.on('unhandledRejection', (reason, promise) => {
+          console.error('Unhandled Promise Rejection:', reason);
+          // Don't exit the process, just log the error
+        });
+        
+      } catch (error) {
+        console.error('Failed to initialize server:', error);
+        process.exit(1);
+      }
+    })();
     
   } catch (error) {
     console.error('Failed to initialize server:', error);

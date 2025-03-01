@@ -23,6 +23,8 @@ export async function apiRequest<T = any>(
     // Prepend API_BASE_URL to relative URLs
     const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
     
+    console.log(`Fetching from: ${fullUrl} (API_BASE_URL: ${API_BASE_URL})`);
+    
     const res = await fetch(fullUrl, {
       method,
       headers: {
@@ -73,6 +75,8 @@ export const getQueryFn: <T>(options: {
           url = '/api/creators';
         } else if (queryKey[0] === 'followers') {
           url = '/api/followers';
+        } else if (queryKey[0] === 'models') {
+          url = '/api/models';
         } else {
           url = `/api/${queryKey[0]}`;
         }
@@ -83,10 +87,15 @@ export const getQueryFn: <T>(options: {
       
       // Add a timeout to prevent hanging requests
       const controller = new AbortController();
-      let timeoutId: number | null = setTimeout(() => {
-        console.warn(`Request to ${url} timed out after 15 seconds`);
+      let timeoutId: number | null = null;
+      
+      // Use a shorter timeout for the models endpoint
+      const timeoutDuration = url.includes('/api/models') ? 10000 : 30000; // 10 seconds for models, 30 for others
+      
+      timeoutId = setTimeout(() => {
+        console.warn(`Request to ${url} timed out after ${timeoutDuration/1000} seconds`);
         controller.abort();
-      }, 15000); // 15 second timeout
+      }, timeoutDuration);
       
       // Function to clear timeout safely
       const clearTimeoutSafe = () => {
@@ -99,7 +108,7 @@ export const getQueryFn: <T>(options: {
       try {
         // Prepend API_BASE_URL to relative URLs if needed
         const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
-        console.log(`Fetching from: ${fullUrl}`);
+        console.log(`Fetching from: ${fullUrl} (API_BASE_URL: ${API_BASE_URL})`);
         
         // First check if the server is available
         try {
@@ -193,7 +202,7 @@ export const getQueryFn: <T>(options: {
           
           // Check if this is an abort error (timeout)
           if (error instanceof DOMException && error.name === 'AbortError') {
-            console.error(`Request to ${url} timed out after 15 seconds`);
+            console.error(`Request to ${url} timed out after ${timeoutDuration/1000} seconds`);
             return getFallbackData(url) as T;
           }
           
@@ -238,7 +247,26 @@ export const getQueryFn: <T>(options: {
   };
 
 // Provide fallback data for common API endpoints to prevent app crashes
-function getFallbackData(url: string): any {
+export function getFallbackData(url: string): any {
+  console.log(`Using fallback data for: ${url} (endpoint: ${url.split('/').pop()}, isPremium: false)`);
+  
+  if (url.includes('/api/gallery')) {
+    return [];
+  }
+  
+  if (url.includes('/api/models')) {
+    console.warn('Using empty fallback data for models endpoint');
+    return [];
+  }
+  
+  if (url.includes('/api/creators')) {
+    return { creators: [], total: 0, page: 1, pageSize: 10 };
+  }
+  
+  if (url.includes('/api/followers')) {
+    return [];
+  }
+  
   // Extract the endpoint name from the URL
   const urlParts = url.split('/');
   const lastPart = urlParts[urlParts.length - 1] || '';
@@ -290,6 +318,9 @@ function getFallbackData(url: string): any {
       return [];
     
     case 'featured':
+      return [];
+    
+    case 'models':
       return [];
     
     case 'session':
@@ -421,83 +452,84 @@ const createSafeStorage = () => {
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (failureCount, error) => {
-        // Don't retry on extension errors
-        if (isExtensionError(error)) {
-          console.warn('Suppressing extension error in query retry:', 
-            error instanceof Error ? error.message : String(error).substring(0, 100));
-          return false;
-        }
-        
-        // Only retry a few times for other errors
-        return failureCount < 2;
-      },
-      // Prevent refetching too often
       staleTime: 1000 * 60 * 5, // 5 minutes
-      // Handle errors globally
-      onError: (error) => {
-        if (isExtensionError(error)) {
-          console.warn('Suppressing extension error in query onError:', 
-            error instanceof Error ? error.message : String(error).substring(0, 100));
-          
-          // Track extension errors
-          try {
-            const extensionErrorCount = parseInt(sessionStorage.getItem('query_extension_errors') || '0');
-            sessionStorage.setItem('query_extension_errors', (extensionErrorCount + 1).toString());
-            
-            // If we're getting too many extension errors, try recovery
-            if (extensionErrorCount > 3 && !sessionStorage.getItem('recovery_in_progress')) {
-              sessionStorage.setItem('recovery_in_progress', 'true');
-              console.log('Too many query extension errors, attempting recovery...');
-              window.attemptRecovery?.();
-            }
-          } catch (e) {
-            // Ignore storage errors
+      retry: (failureCount, error) => {
+        // Don't retry on 401 (Unauthorized) or 403 (Forbidden)
+        if (error instanceof Error) {
+          // Check for specific error types
+          if (error.message.includes('401') || error.message.includes('403')) {
+            console.log('Not retrying due to auth error:', error.message);
+            return false;
           }
           
-          // Don't propagate extension errors
-          return;
+          // Don't retry on browser extension errors
+          if (
+            error.message.includes('chrome-extension') || 
+            error.message.includes('Failed to fetch dynamically imported module')
+          ) {
+            console.log('Not retrying due to browser extension error:', error.message);
+            return false;
+          }
+          
+          // Special handling for models endpoint
+          if (error.message.includes('/api/models') && error.message.includes('timeout')) {
+            console.log('Models endpoint timeout, retrying once more:', error.message);
+            return failureCount < 1; // Only retry once for models endpoint timeouts
+          }
         }
         
-        // Log other errors
-        console.error('Query error:', error);
+        // Default retry logic (3 times)
+        return failureCount < 3;
       },
-      // Disable persisting queries to localStorage to avoid extension issues
-      gcTime: 1000 * 60 * 60, // 1 hour
+      retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
+      onError: (error) => {
+        console.error('Query error:', error);
+        
+        // Log detailed information about the error
+        if (error instanceof Error) {
+          console.error('Error name:', error.name);
+          console.error('Error message:', error.message);
+          console.error('Error stack:', error.stack);
+          
+          // Handle AbortError specifically
+          if (error.name === 'AbortError') {
+            console.log('Request was aborted, likely due to timeout or user navigation');
+          }
+        }
+      }
     },
     mutations: {
       retry: (failureCount, error) => {
-        // Don't retry on extension errors
-        if (isExtensionError(error)) {
-          console.warn('Suppressing extension error in mutation:', 
-            error instanceof Error ? error.message : String(error).substring(0, 100));
-          return false;
-        }
-        
-        // Don't retry mutations by default
-        return false;
-      },
-      onError: (error) => {
-        if (isExtensionError(error)) {
-          console.warn('Suppressing extension error in mutation onError:', 
-            error instanceof Error ? error.message : String(error).substring(0, 100));
-          
-          // Track extension errors
-          try {
-            const extensionErrorCount = parseInt(sessionStorage.getItem('mutation_extension_errors') || '0');
-            sessionStorage.setItem('mutation_extension_errors', (extensionErrorCount + 1).toString());
-          } catch (e) {
-            // Ignore storage errors
+        // Don't retry on 401 (Unauthorized) or 403 (Forbidden)
+        if (error instanceof Error) {
+          if (error.message.includes('401') || error.message.includes('403')) {
+            console.log('Not retrying mutation due to auth error:', error.message);
+            return false;
           }
           
-          // Don't propagate extension errors
-          return;
+          // Don't retry on browser extension errors
+          if (
+            error.message.includes('chrome-extension') || 
+            error.message.includes('Failed to fetch dynamically imported module')
+          ) {
+            console.log('Not retrying mutation due to browser extension error:', error.message);
+            return false;
+          }
         }
         
-        // Log other errors
-        console.error('Mutation error:', error);
+        // Default retry logic (1 time for mutations)
+        return failureCount < 1;
       },
-    },
-  },
-  storage: createSafeStorage(),
+      onError: (error) => {
+        console.error('Mutation error:', error);
+        
+        // Log detailed information about the error
+        if (error instanceof Error) {
+          console.error('Error name:', error.name);
+          console.error('Error message:', error.message);
+          console.error('Error stack:', error.stack);
+        }
+      }
+    }
+  }
 });

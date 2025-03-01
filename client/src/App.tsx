@@ -5,6 +5,8 @@ import { queryClient } from './lib/queryClient'
 import { Toaster } from './components/ui/toaster'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import FallbackApp from './components/FallbackApp'
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 // Lazy load pages to reduce initial bundle size
 const HomePage = React.lazy(() => import('./pages/home'))
@@ -38,42 +40,15 @@ function App() {
       console.warn('Caught error:', errorMessage);
       
       // Check if this is related to extensions or problematic APIs
+      // Significantly reduced to prevent false positives
       const isExtensionError = 
-        // Chrome extension specific patterns
-        errorMessage.includes('chrome-extension') ||
-        errorMessage.includes('extension://') ||
-        errorStack?.includes('chrome-extension') ||
-        errorStack?.includes('extension://') ||
-        // Firefox extension patterns
-        errorMessage.includes('moz-extension') ||
-        errorStack?.includes('moz-extension') ||
-        // Safari extension patterns
-        errorMessage.includes('safari-extension') ||
-        errorMessage.includes('safari-web-extension') ||
-        errorStack?.includes('safari-extension') ||
-        // Common extension error messages
-        errorMessage.includes('Failed to fetch dynamically imported module') ||
-        errorMessage.includes('useUserExtension') ||
-        errorMessage.includes('useUserExtension-7c796cda.js') ||
-        errorMessage.includes('redacted') ||
-        errorMessage.includes('localStorage') ||
-        errorMessage.includes('extension') ||
-        errorMessage.includes('primitive value') ||
-        errorMessage.includes('Cannot convert object to primitive value') ||
-        // Security and storage errors often caused by extensions
-        errorMessage.includes('SecurityError') ||
-        errorMessage.includes('QuotaExceededError') ||
-        errorMessage.includes('NotAllowedError') ||
-        errorMessage.includes('Failed to execute') ||
-        errorMessage.includes('The operation is insecure') ||
-        errorMessage.includes('access storage') ||
-        errorMessage.includes('null is not an object') ||
-        errorMessage.includes('undefined is not an object') ||
-        // React Router and network errors
-        errorMessage.includes('Failed to fetch') ||
-        errorMessage.includes('Network error') ||
-        errorMessage.includes('net::ERR_ABORTED') ||
-        errorMessage.includes('React Router');
+        // Only check for the most specific extension patterns
+        errorMessage.includes('chrome-extension://') ||
+        errorStack?.includes('chrome-extension://') ||
+        errorMessage.includes('moz-extension://') ||
+        errorStack?.includes('moz-extension://') ||
+        errorMessage.includes('safari-extension://') ||
+        errorStack?.includes('safari-extension://');
       
       if (isExtensionError) {
         // Count these errors
@@ -94,8 +69,8 @@ function App() {
           // Ignore storage errors
         }
         
-        // If we get too many errors, switch to fallback mode
-        if (errorCount > 3) {
+        // Increased threshold from 3 to 10 to prevent premature fallback
+        if (errorCount > 10) {
           console.warn('Too many extension errors, switching to fallback mode');
           setHasError(true);
           
@@ -161,6 +136,41 @@ function App() {
     }
   }, [errorCount]);
   
+  // Add a cleanup effect that runs when the app first loads
+  useEffect(() => {
+    // Clear any recovery-related flags that might be stuck
+    try {
+      sessionStorage.removeItem('recovery_mode');
+      sessionStorage.removeItem('app_extension_errors');
+      sessionStorage.removeItem('last_extension_error');
+      
+      // Clear any error-related localStorage items
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (
+          key.includes('error') || 
+          key.includes('recovery') || 
+          key.includes('extension')
+        )) {
+          keysToRemove.push(key);
+        }
+      }
+      
+      keysToRemove.forEach(key => {
+        try {
+          localStorage.removeItem(key);
+        } catch (e) {
+          console.warn('Failed to remove item:', key);
+        }
+      });
+      
+      console.log('Cleared recovery-related storage items on app load');
+    } catch (e) {
+      console.error('Failed to clear storage during startup:', e);
+    }
+  }, []);
+  
   // Watchdog timer to detect if the app is stuck
   useEffect(() => {
     // Only start watchdog if we've seen errors
@@ -172,19 +182,22 @@ function App() {
     // and have accumulated errors, switch to fallback mode
     const watchdogTimer = setTimeout(() => {
       console.warn('Watchdog timer detected potential stuck state');
-      setIsStuck(true);
-    }, 45000); // Increased from 15s to 45s
+      // Disable automatic stuck state detection
+      // setIsStuck(true);
+    }, 90000); // Increased from 45s to 90s
     
-    // Set up a second watchdog timer for extreme cases
+    // Disable emergency watchdog
+    /*
     const emergencyWatchdog = setTimeout(() => {
       console.warn('Emergency watchdog triggered - app may be stuck');
       // Don't automatically set hasError, just log the warning
       // setHasError(true);
-    }, 60000); // Increased from 30s to 60s
+    }, 60000);
+    */
     
     return () => {
       clearTimeout(watchdogTimer);
-      clearTimeout(emergencyWatchdog);
+      // clearTimeout(emergencyWatchdog);
     };
   }, [errorCount]);
   
@@ -302,6 +315,7 @@ function App() {
           </Suspense>
         </BrowserRouter>
         <Toaster />
+        <ToastContainer />
       </QueryClientProvider>
     </ErrorBoundary>
   )

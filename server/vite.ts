@@ -24,14 +24,14 @@ export async function setupVite(app: Express, server: Server) {
     app.use('/uploads', express.static(path.resolve(__dirname, 'uploads')));
     
     app.use('/assets', (req, res) => {
-      res.redirect(`http://localhost:5173${req.url}`);
+      res.redirect(`http://localhost:3007${req.url}`);
     });
 
     app.use('/', (req, res, next) => {
       if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
         return next();
       }
-      res.redirect('http://localhost:5173');
+      res.redirect('http://localhost:3007');
     });
   }
 }

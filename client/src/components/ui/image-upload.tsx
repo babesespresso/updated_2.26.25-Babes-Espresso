@@ -4,8 +4,8 @@ import { Card } from "./card";
 import { cn } from "../../lib/utils";
 
 interface ImageUploadProps {
-  onChange: (file: File) => void;
-  value?: File;
+  onChange: (file: File | undefined) => void;
+  value?: File | null;
   className?: string;
   label: string;
 }

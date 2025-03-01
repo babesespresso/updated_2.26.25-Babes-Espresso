@@ -10,9 +10,13 @@ interface ProcessedImage {
 
 export async function processImage(inputPath: string, outputPath: string): Promise<ProcessedImage> {
   try {
+    console.log('Starting image processing:', { inputPath, outputPath });
+    const startTime = Date.now();
+    
     // Verify input file exists and is readable
     try {
       await fs.promises.access(inputPath, fs.constants.R_OK);
+      console.log('Input file is accessible');
     } catch (error) {
       throw new Error(`Input file is not accessible: ${error.message}`);
     }
@@ -21,13 +25,22 @@ export async function processImage(inputPath: string, outputPath: string): Promi
     const outputDir = path.dirname(outputPath);
     try {
       await fs.promises.access(outputDir, fs.constants.W_OK);
+      console.log('Output directory is writable');
     } catch (error) {
       throw new Error(`Output directory is not writable: ${error.message}`);
     }
 
     // Load the image
     const image = sharp(inputPath);
+    console.log('Sharp instance created');
+    
     const metadata = await image.metadata();
+    console.log('Image metadata retrieved:', { 
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      size: metadata.size
+    });
     
     if (!metadata.width || !metadata.height) {
       throw new Error('Could not get image dimensions');
@@ -44,8 +57,8 @@ export async function processImage(inputPath: string, outputPath: string): Promi
     }
 
     // Maximum dimensions while maintaining aspect ratio
-    const maxWidth = 1920;
-    const maxHeight = 1080;
+    const maxWidth = 1200; // Reduced from 1920 for better performance
+    const maxHeight = 800; // Reduced from 1080 for better performance
 
     // Calculate target dimensions while maintaining aspect ratio
     let targetWidth = metadata.width;
@@ -61,17 +74,22 @@ export async function processImage(inputPath: string, outputPath: string): Promi
         targetHeight = maxHeight;
         targetWidth = Math.round(maxHeight * aspectRatio);
       }
+      console.log('Resizing image to:', { targetWidth, targetHeight });
+    } else {
+      console.log('Image dimensions are within limits, no resizing needed');
     }
 
     // Process the image with better error handling
     try {
+      console.log('Starting image transformation');
       await image
         .resize(targetWidth, targetHeight, {
           fit: 'inside',
           withoutEnlargement: true
         })
-        .jpeg({ quality: 85, progressive: true })
+        .jpeg({ quality: 80, progressive: true }) // Reduced quality from 85 to 80 for better performance
         .toFile(outputPath);
+      console.log('Image transformation completed');
     } catch (error) {
       throw new Error(`Failed to process image: ${error.message}`);
     }
@@ -79,9 +97,13 @@ export async function processImage(inputPath: string, outputPath: string): Promi
     // Verify the output file was created
     try {
       await fs.promises.access(outputPath, fs.constants.R_OK);
+      console.log('Output file verified');
     } catch (error) {
       throw new Error(`Failed to verify output file: ${error.message}`);
     }
+
+    const endTime = Date.now();
+    console.log(`Image processing completed in ${endTime - startTime}ms`);
 
     return {
       path: outputPath,
@@ -96,36 +118,29 @@ export async function processImage(inputPath: string, outputPath: string): Promi
 
 export async function ensureImageQuality(inputPath: string): Promise<void> {
   try {
+    console.log('Checking image quality:', { inputPath });
+    const startTime = Date.now();
+    
     const metadata = await sharp(inputPath).metadata();
     
     if (!metadata.width || !metadata.height) {
       throw new Error('Could not get image dimensions');
     }
-
-    // Check if image meets minimum quality requirements
-    const minWidth = 480;
-    const minHeight = 360;
-
+    
+    console.log('Image dimensions:', { width: metadata.width, height: metadata.height });
+    
+    // Minimum dimensions for gallery images
+    const minWidth = 400;
+    const minHeight = 400;
+    
     if (metadata.width < minWidth || metadata.height < minHeight) {
-      throw new Error(`Image dimensions too small. Minimum required: ${minWidth}x${minHeight}px`);
+      throw new Error(`Image dimensions too small. Minimum size is ${minWidth}x${minHeight} pixels.`);
     }
-
-    // Check file size
-    const stats = await fs.promises.stat(inputPath);
-    const maxSize = 5 * 1024 * 1024; // 5MB
-    if (stats.size > maxSize) {
-      throw new Error(`File size too large. Maximum allowed: 5MB`);
-    }
-
-    // Validate format
-    const allowedFormats = ['jpeg', 'jpg', 'png', 'webp'];
-    if (!metadata.format || !allowedFormats.includes(metadata.format)) {
-      throw new Error(`Invalid image format. Allowed formats: ${allowedFormats.join(', ')}`);
-    }
+    
+    const endTime = Date.now();
+    console.log(`Image quality check completed in ${endTime - startTime}ms`);
   } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(`Image quality check failed: ${error.message}`);
-    }
-    throw new Error('Image quality check failed: Unknown error');
+    console.error('Image quality check failed:', error);
+    throw new Error(`Image quality check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }

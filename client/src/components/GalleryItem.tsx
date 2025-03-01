@@ -111,7 +111,7 @@ export function GalleryItem({ image, type = 'gallery' }: GalleryItemProps) {
   return (
     <div className="relative group">
       <img
-        src={image.url.startsWith('http') ? image.url : `/uploads/${image.url.split('/').pop()}`}
+        src={image.url.startsWith('http') ? image.url : `${API_BASE_URL}${image.url}`}
         alt={image.title}
         className="w-full h-48 object-cover rounded-lg"
         onError={(e) => {
@@ -120,15 +120,55 @@ export function GalleryItem({ image, type = 'gallery' }: GalleryItemProps) {
           
           // Try alternative path if the original path fails
           const currentSrc = e.currentTarget.src;
+          console.log('Image load error. Trying fallback from:', currentSrc);
+          
           if (!currentSrc.includes('?fallback=true')) {
             // Try with a different base path
             const imagePath = image.url.split('/').pop();
-            e.currentTarget.src = `/uploads/${imagePath}?fallback=true`;
+            if (!imagePath) {
+              console.error('Could not extract image filename from URL:', image.url);
+              e.currentTarget.src = 'https://placehold.co/400x300?text=Image+Not+Found';
+              return;
+            }
+            
+            // First fallback: try with API_BASE_URL
+            const fallbackSrc = `${API_BASE_URL}/uploads/${imagePath}?fallback=true`;
+            console.log('Trying fallback URL:', fallbackSrc);
+            e.currentTarget.src = fallbackSrc;
             return;
           }
           
-          // If fallback also fails, use placeholder
-          e.currentTarget.src = 'https://placehold.co/600x400?text=Image+Not+Found';
+          if (!currentSrc.includes('?fallback=second')) {
+            // Second fallback: try with relative path
+            const imagePath = image.url.split('/').pop();
+            if (!imagePath) {
+              e.currentTarget.src = 'https://placehold.co/400x300?text=Image+Not+Found';
+              return;
+            }
+            
+            const secondFallbackSrc = `/uploads/${imagePath}?fallback=second`;
+            console.log('Trying second fallback URL:', secondFallbackSrc);
+            e.currentTarget.src = secondFallbackSrc;
+            return;
+          }
+          
+          if (!currentSrc.includes('?fallback=third')) {
+            // Third fallback: try with window.location.origin
+            const imagePath = image.url.split('/').pop();
+            if (!imagePath) {
+              e.currentTarget.src = 'https://placehold.co/400x300?text=Image+Not+Found';
+              return;
+            }
+            
+            const thirdFallbackSrc = `${window.location.origin}/uploads/${imagePath}?fallback=third`;
+            console.log('Trying third fallback URL:', thirdFallbackSrc);
+            e.currentTarget.src = thirdFallbackSrc;
+            return;
+          }
+          
+          // If all fallbacks fail, show placeholder
+          e.currentTarget.src = 'https://placehold.co/400x300?text=Image+Not+Found';
+          e.currentTarget.alt = 'Image failed to load';
         }}
       />
       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity p-4">

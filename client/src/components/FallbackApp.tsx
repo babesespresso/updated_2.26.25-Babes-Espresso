@@ -94,8 +94,39 @@ export function FallbackApp() {
       <div className="max-w-md w-full bg-gray-800 p-8 rounded-lg shadow-lg">
         <h1 className="text-2xl font-bold mb-4">Babes Espresso</h1>
         
+        {/* Add a bypass button at the top */}
+        <div className="bg-amber-900/30 border border-amber-800 rounded-md p-4 mb-6">
+          <h2 className="text-lg font-semibold mb-2">Bypass Recovery</h2>
+          <p className="mb-4 text-sm">
+            If you believe this recovery screen is showing in error, you can bypass it and go directly to the application.
+          </p>
+          <button
+            onClick={() => {
+              // Clear all recovery flags
+              try {
+                sessionStorage.removeItem('recovery_mode');
+                sessionStorage.removeItem('recovery_timestamp');
+                sessionStorage.removeItem('recovery_attempts');
+                sessionStorage.removeItem('app_extension_errors');
+                sessionStorage.removeItem('last_extension_error');
+                
+                // Set a bypass flag
+                localStorage.setItem('bypass_recovery', 'true');
+                
+                // Redirect to home page
+                window.location.href = '/';
+              } catch (e) {
+                console.error('Failed to bypass recovery:', e);
+              }
+            }}
+            className="w-full py-2 bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
+          >
+            Bypass Recovery and Go to Application
+          </button>
+        </div>
+        
         <div className="bg-red-900/30 border border-red-800 rounded-md p-4 mb-6">
-          <h2 className="text-xl font-semibold mb-2">Application Error</h2>
+          <h2 className="text-xl font-bold mb-2">Application Error</h2>
           <p className="mb-4">
             We've detected an issue that's preventing the application from loading properly.
             This is likely caused by a browser extension interfering with the application.

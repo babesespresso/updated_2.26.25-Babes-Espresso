@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from "@shared/schema";
@@ -6,7 +6,7 @@ import path from 'path';
 import fs from 'fs';
 
 // Ensure the database directory exists
-const dbDir = path.dirname('sqlite.db');
+const dbDir = path.dirname('babes_espresso.db');
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
@@ -14,7 +14,7 @@ if (!fs.existsSync(dbDir)) {
 let sqlite: Database.Database;
 try {
   // Improved SQLite connection with better options
-  sqlite = new Database('sqlite.db', { 
+  sqlite = new Database('babes_espresso.db', { 
     verbose: process.env.NODE_ENV === 'development' ? console.log : undefined,
     fileMustExist: false,
     timeout: 5000, // 5 seconds
@@ -52,13 +52,11 @@ export const db = drizzle(sqlite, { schema });
 
 // Initialize database tables
 const initDb = async () => {
-  console.log('Starting database initialization...');
+  console.log('Initializing database tables...');
   try {
-    console.log('Initializing database tables...');
-    
-    // Create tables directly using schema
-    const queries = [
-      `CREATE TABLE IF NOT EXISTS users (
+    // Create tables if they don't exist
+    await db.run(sql`
+      CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT NOT NULL UNIQUE,
         password TEXT NOT NULL,
@@ -68,11 +66,31 @@ const initDb = async () => {
         avatar_url TEXT,
         bio TEXT,
         verified INTEGER DEFAULT 0,
-        is_approved INTEGER DEFAULT 0,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        profile_id INTEGER
-      )`,
-      `CREATE TABLE IF NOT EXISTS gallery (
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    
+    await db.run(sql`
+      CREATE TABLE IF NOT EXISTS models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        date_of_birth TEXT NOT NULL,
+        alias_name TEXT,
+        social_platforms TEXT NOT NULL,
+        social_handles TEXT,
+        only_fans_link TEXT,
+        body_photo_url TEXT NOT NULL,
+        license_photo_url TEXT NOT NULL,
+        terms_accepted TEXT NOT NULL
+      );
+    `);
+    
+    await db.run(sql`
+      CREATE TABLE IF NOT EXISTS gallery (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         url TEXT NOT NULL,
         title TEXT NOT NULL,
@@ -86,43 +104,13 @@ const initDb = async () => {
         twitter TEXT,
         onlyfans TEXT,
         description TEXT
-      )`,
-      `CREATE TABLE IF NOT EXISTS follower_profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL UNIQUE,
-        preferences TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-      )`,
-      `CREATE TABLE IF NOT EXISTS creator_profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL UNIQUE,
-        alias_name TEXT,
-        instagram TEXT,
-        twitter TEXT,
-        tiktok TEXT,
-        onlyfans TEXT,
-        featured_image_url TEXT,
-        monthly_subscription_price REAL NOT NULL DEFAULT 0,
-        per_post_price REAL NOT NULL DEFAULT 0,
-        approval_status TEXT NOT NULL DEFAULT 'pending',
-        approval_date TEXT,
-        approved_by INTEGER,
-        rejection_reason TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (approved_by) REFERENCES users(id)
-      )`
-    ];
-
-    for (const query of queries) {
-      sqlite.exec(query);
-    }
-
+      );
+    `);
+    
     console.log('Database tables initialized successfully');
   } catch (error) {
     console.error('Failed to initialize database tables:', error);
-    throw error;
+    throw new Error(`Database initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
 
@@ -167,4 +155,4 @@ export const initializeDatabase = async () => {
   await createDefaultAdmin();
 };
 
-export { eq, and };
+export { eq, and, sql };

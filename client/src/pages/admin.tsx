@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getQueryFn } from "../lib/queryClient";
-import { Link } from "react-router-dom";
+import { apiRequest } from '@/lib/api';
 import {
   Card,
   CardContent,
@@ -61,6 +61,9 @@ export default function AdminDashboard() {
   const [selectedCreatorId, setSelectedCreatorId] = useState<number | null>(null);
   const [selectedCreatorName, setSelectedCreatorName] = useState<string | null>(null);
   const [viewingContent, setViewingContent] = useState(false);
+  const [modelsData, setModelsData] = useState<Model[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelsError, setModelsError] = useState<Error | null>(null);
   const [uploadFormData, setUploadFormData] = useState<UploadFormData>({
     title: '',
     description: '',
@@ -73,13 +76,36 @@ export default function AdminDashboard() {
     contentRating: 'sfw',
     isPremium: false
   });
-  // Completely disable the models query since it's causing errors
-  // and isn't critical for the gallery functionality
-  const { data: models, isLoading: modelsLoading, error: modelsError } = {
-    data: [],
-    isLoading: false,
-    error: null
-  } as const;
+  const [galleryDialogOpen, setGalleryDialogOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchModels = async () => {
+      setModelsLoading(true);
+      setModelsError(null);
+      
+      try {
+        console.log('⭐️ Starting models data fetch...');
+        const startTime = Date.now();
+        
+        const data = await apiRequest<any[]>('/api/models', {}, 15000);
+        const duration = Date.now() - startTime;
+        
+        console.log(`⭐️ Models data fetch completed in ${duration}ms`);
+        console.log('⭐️ Models data received:', data);
+        
+        setModelsData(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error('⭐️ Models fetch error:', error);
+        setModelsError(error instanceof Error ? error : new Error('Unknown error'));
+        console.log('⭐️ Using empty fallback data for models');
+        setModelsData([]);
+      } finally {
+        setModelsLoading(false);
+      }
+    };
+
+    fetchModels();
+  }, [toast]);
 
   const { data: galleryData = [], error: galleryError, isLoading: galleryLoading } = useQuery({
     queryKey: ['gallery'],
@@ -89,6 +115,9 @@ export default function AdminDashboard() {
     staleTime: 60000, // 1 minute
     gcTime: 120000, // 2 minutes
     refetchOnWindowFocus: false,
+    onSuccess: (data) => {
+      console.log('Gallery data loaded successfully:', data);
+    },
     onError: (error) => {
       console.error('Gallery fetch error:', error);
       toast({
@@ -179,11 +208,13 @@ export default function AdminDashboard() {
     }
   });
 
-  const filteredModels = models?.filter(model =>
-    model.firstName.toLowerCase().includes(search.toLowerCase()) ||
-    model.lastName.toLowerCase().includes(search.toLowerCase()) ||
-    model.email.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredModels = modelsData
+    .filter((model) =>
+      model.first_name.toLowerCase().includes(search.toLowerCase()) ||
+      model.last_name.toLowerCase().includes(search.toLowerCase()) ||
+      model.email.toLowerCase().includes(search.toLowerCase()) ||
+      (model.alias_name && model.alias_name.toLowerCase().includes(search.toLowerCase()))
+    );
 
   const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
@@ -210,6 +241,50 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error('Upload error:', error);
       toast({ title: "Error", description: "Failed to upload profile picture", variant: "destructive" });
+    }
+  };
+
+  // Robust API request function with timeout handling
+  const apiRequest = async (url: string, options: RequestInit, timeoutMs = 60000) => {
+    console.log(`Making API request to ${url} with timeout ${timeoutMs}ms`);
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      console.log(`Request to ${url} timed out after ${timeoutMs}ms`);
+    }, timeoutMs);
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        credentials: 'include'
+      });
+      
+      clearTimeout(timeoutId);
+      
+      console.log(`Received response from ${url}:`, {
+        status: response.status,
+        statusText: response.statusText
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(errorData.message || errorData.details || errorData.error || `Request failed with status ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error(`Request timeout after ${timeoutMs}ms`);
+        }
+        throw error;
+      }
+      
+      throw new Error('Unknown error occurred');
     }
   };
 
@@ -242,7 +317,19 @@ export default function AdminDashboard() {
     }
 
     // Show loading toast
-    toast({ title: 'Uploading...', description: 'Please wait while your image is being uploaded' });
+    const loadingToast = toast({ 
+      title: 'Uploading...', 
+      description: 'Please wait while your image is being uploaded',
+      duration: 60000 // Longer duration for large uploads
+    });
+    
+    console.log('Starting gallery upload process', {
+      fileName: data.file.name,
+      fileType: data.file.type,
+      fileSize: data.file.size,
+      title: data.title,
+      endpoint: `${API_BASE_URL}/api/${type}`
+    });
 
     const formData = new FormData();
     formData.append('image', data.file);
@@ -257,82 +344,76 @@ export default function AdminDashboard() {
     formData.append('onlyfans', data.onlyfans);
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      // Use the proper endpoint instead of the test endpoint
+      const endpoint = `/api/${type}`;
+      console.log('Sending request to:', `${API_BASE_URL}${endpoint}`);
+      
+      // Use the new apiRequest function with a 120 second timeout for large files
+      const responseData = await apiRequest(`${endpoint}`, {
+        method: 'POST',
+        body: formData
+      }, 120000);
+      
+      console.log('Upload successful:', responseData);
 
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/${type}`, {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-          const responseData = await response.json();
-          throw new Error(responseData.message || responseData.details || responseData.error || 'Upload failed');
-        }
-
-        const responseData = await response.json();
-        console.log('Upload successful:', responseData);
-
-        toast({ title: 'Success', description: `${type} uploaded successfully` });
-        
-        // Fix: Properly invalidate the correct query key
-        if (type === 'gallery') {
-          queryClient.invalidateQueries({ queryKey: ['gallery'] });
-        } else if (type === 'featured') {
-          queryClient.invalidateQueries({ queryKey: ['featured'] });
-        }
-        
-        // Reset form
-        setUploadFormData({
-          title: '',
-          description: '',
-          tags: '',
-          instagram: '',
-          tiktok: '',
-          twitter: '',
-          onlyfans: '',
-          file: null,
-          contentRating: 'sfw',
-          isPremium: false
-        });
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
+      toast({ 
+        title: 'Success', 
+        description: `${type.charAt(0).toUpperCase() + type.slice(1)} uploaded successfully` 
+      });
+      
+      // Close the dialog after successful upload
+      setGalleryDialogOpen(false);
+      
+      // Fix: Properly invalidate the correct query key
+      if (type === 'gallery') {
+        queryClient.invalidateQueries({ queryKey: ['gallery'] });
+      } else if (type === 'featured') {
+        queryClient.invalidateQueries({ queryKey: ['featured'] });
+      }
+      
+      // Reset form
+      setUploadFormData({
+        title: '',
+        description: '',
+        tags: '',
+        instagram: '',
+        tiktok: '',
+        twitter: '',
+        onlyfans: '',
+        file: null,
+        contentRating: 'sfw',
+        isPremium: false
+      });
+    } catch (error) {
+      console.error('Upload error:', error);
+      
+      if (error instanceof Error) {
+        if (error.message.includes('timeout')) {
           toast({ 
             title: 'Upload Timeout', 
-            description: 'The upload took too long and was cancelled. Please try again.',
+            description: 'The upload took too long. Try using a smaller image or check your network connection.',
             variant: 'destructive'
           });
-          return;
-        }
-
-        if (error instanceof Error && error.message?.includes('Server storage error')) {
+        } else if (error.message.includes('Server storage error')) {
           toast({ 
             title: 'Server Error', 
             description: 'There was an issue with the server storage. Please try again later.',
             variant: 'destructive'
           });
-          return;
+        } else {
+          toast({ 
+            title: 'Upload Failed', 
+            description: error.message || 'Failed to upload image', 
+            variant: 'destructive' 
+          });
         }
-
-        console.error('Upload error:', error);
+      } else {
         toast({ 
-          title: 'Upload Failed', 
-          description: error instanceof Error ? error.message : 'Failed to upload image', 
+          title: 'Error', 
+          description: 'An unexpected error occurred', 
           variant: 'destructive' 
         });
       }
-    } catch (error) {
-      console.error('Unexpected error:', error);
-      toast({ 
-        title: 'Error', 
-        description: 'An unexpected error occurred', 
-        variant: 'destructive' 
-      });
     }
   };
 
@@ -459,7 +540,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="container mx-auto p-6 min-h-screen">
+    <div className="container mx-auto p-4 md:p-6 lg:p-8 min-h-screen">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Admin Dashboard</h1>
         <DropdownMenu>
@@ -482,14 +563,14 @@ export default function AdminDashboard() {
                 className="hidden"
               />
             </DropdownMenuItem>
-            <DropdownMenuItem>
-                <Link to="/">Go to Homepage</Link>
+            <DropdownMenuItem onClick={() => window.location.href = '/'}>
+              Go to Homepage
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
-      <Tabs defaultValue="dashboard" className="space-y-4">
+      <Tabs defaultValue="dashboard" className="space-y-8">
         <TabsList className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-7 w-full">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="gallery">Gallery</TabsTrigger>
@@ -508,10 +589,8 @@ export default function AdminDashboard() {
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37z" />
+                  <path d="M15 12h3.25" />
                 </svg>
               </CardHeader>
               <CardContent>
@@ -735,9 +814,9 @@ export default function AdminDashboard() {
                 >
                   Remove All Premium
                 </Button>
-                <Dialog>
+                <Dialog open={galleryDialogOpen} onOpenChange={setGalleryDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button variant="outline">Upload</Button>
+                    <Button variant="outline" onClick={() => setGalleryDialogOpen(true)}>Upload</Button>
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
@@ -868,7 +947,7 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button onClick={() => handleGalleryUpload(uploadFormData, 'gallery')}>Upload</Button>
+                      <Button onClick={() => handleGalleryUpload(uploadFormData, 'gallery')}>Submit</Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
@@ -929,7 +1008,7 @@ export default function AdminDashboard() {
                         formData.append('title', file.name);
                         formData.append('type', 'featured');
                         
-                        const response = await fetch(`${API_BASE_URL}/api/featured`, {
+                        const response = await apiRequest('/api/featured', {
                           method: 'POST',
                           body: formData,
                           credentials: 'include'
@@ -971,6 +1050,248 @@ export default function AdminDashboard() {
                   <GalleryItem key={image.id} image={image} type="featured" />
                 ))}
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="models">
+          <Card>
+            <CardHeader>
+              <CardTitle>Model Applications</CardTitle>
+              <CardDescription>Review and manage model applications</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {modelsError ? (
+                <div className="flex flex-col items-center justify-center p-6 text-center">
+                  <h3 className="text-lg font-medium mb-2">Error loading model applications</h3>
+                  <p className="text-sm text-gray-500 mb-4">
+                    {modelsError.message || 'Unknown error'}
+                  </p>
+                  <p className="text-sm text-amber-600 mb-4">
+                    There appears to be an issue with the database connection. Our team is working to fix this.
+                  </p>
+                  <Button 
+                    onClick={() => {
+                      setModelsLoading(true);
+                      setModelsError(null);
+                      
+                      // First try the real API
+                      const fetchModels = async () => {
+                        try {
+                          console.log('Retrying models data fetch with extended timeout...');
+                          const data = await apiRequest<any[]>('/api/models', {}, 20000);
+                          console.log('Models data received:', data);
+                          setModelsData(Array.isArray(data) ? data : []);
+                        } catch (error) {
+                          console.error('Models fetch retry error:', error);
+                          
+                          // If it fails, use empty fallback data
+                          console.log('Using empty fallback data for models');
+                          setModelsData([]);
+                          
+                          // Show a toast notification about using fallback
+                          toast({
+                            title: 'Using Fallback Data',
+                            description: 'Could not connect to database. Using empty model list as fallback.',
+                            variant: 'default'
+                          });
+                        } finally {
+                          setModelsLoading(false);
+                        }
+                      };
+                      
+                      fetchModels();
+                    }}
+                    variant="outline"
+                  >
+                    Try Again
+                  </Button>
+                </div>
+              ) : modelsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Loading model applications...
+                </div>
+              ) : !modelsData?.length ? (
+                <div className="text-center py-12 border border-dashed rounded-lg border-muted-foreground/20">
+                  <h3 className="text-lg font-medium mb-2">No Model Applications Yet</h3>
+                  <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                    When models apply to join Babes Espresso, their applications will appear here for review.
+                  </p>
+                  <div className="flex justify-center">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => window.location.href = '/'}
+                    >
+                      Go to Homepage
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Input
+                      placeholder="Search models..."
+                      className="max-w-sm"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="rounded-md border">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="p-2 text-left font-medium">Name</th>
+                          <th className="p-2 text-left font-medium">Email</th>
+                          <th className="p-2 text-left font-medium">Phone</th>
+                          <th className="p-2 text-left font-medium">Alias</th>
+                          <th className="p-2 text-left font-medium">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modelsData
+                          .filter((model) =>
+                            model.first_name.toLowerCase().includes(search.toLowerCase()) ||
+                            model.last_name.toLowerCase().includes(search.toLowerCase()) ||
+                            model.email.toLowerCase().includes(search.toLowerCase()) ||
+                            (model.alias_name && model.alias_name.toLowerCase().includes(search.toLowerCase()))
+                          )
+                          .map((model, index) => (
+                            <tr key={index} className="border-b">
+                              <td className="p-2">{model.first_name} {model.last_name}</td>
+                              <td className="p-2">{model.email}</td>
+                              <td className="p-2">{model.phone}</td>
+                              <td className="p-2">{model.alias_name || '-'}</td>
+                              <td className="p-2">
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button variant="outline" size="sm">View Details</Button>
+                                  </DialogTrigger>
+                                  <DialogContent className="max-w-3xl">
+                                    <DialogHeader>
+                                      <DialogTitle>Model Application Details</DialogTitle>
+                                    </DialogHeader>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      <div>
+                                        <h3 className="font-medium mb-2">Personal Information</h3>
+                                        <div className="space-y-2">
+                                          <div>
+                                            <span className="font-medium">Name:</span> {model.first_name} {model.last_name}
+                                          </div>
+                                          <div>
+                                            <span className="font-medium">Email:</span> {model.email}
+                                          </div>
+                                          <div>
+                                            <span className="font-medium">Phone:</span> {model.phone}
+                                          </div>
+                                          <div>
+                                            <span className="font-medium">Date of Birth:</span> {model.date_of_birth}
+                                          </div>
+                                          <div>
+                                            <span className="font-medium">Alias:</span> {model.alias_name || '-'}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <h3 className="font-medium mb-2">Social Media</h3>
+                                        <div className="space-y-2">
+                                          <div>
+                                            <span className="font-medium">Platforms:</span> {
+                                              typeof model.social_platforms === 'string' 
+                                                ? JSON.parse(model.social_platforms).join(', ') 
+                                                : Array.isArray(model.social_platforms) 
+                                                  ? model.social_platforms.join(', ') 
+                                                  : '-'
+                                            }
+                                          </div>
+                                          <div>
+                                            <span className="font-medium">Handles:</span> {model.social_handles || '-'}
+                                          </div>
+                                          <div>
+                                            <span className="font-medium">OnlyFans:</span> {model.onlyfans_link || '-'}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="col-span-1 md:col-span-2">
+                                        <h3 className="font-medium mb-2">Photos</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                          <div>
+                                            <p className="text-sm mb-1">Body Photo</p>
+                                            {model.body_photo_url ? (
+                                              <a href={`${API_BASE_URL}${model.body_photo_url}`} target="_blank" rel="noopener noreferrer">
+                                                <img 
+                                                  src={`${API_BASE_URL}${model.body_photo_url}`} 
+                                                  alt="Body Photo" 
+                                                  className="max-w-full h-auto rounded-md border"
+                                                />
+                                              </a>
+                                            ) : (
+                                              <div className="text-muted-foreground">No body photo available</div>
+                                            )}
+                                          </div>
+                                          <div>
+                                            <p className="text-sm mb-1">License Photo (ID)</p>
+                                            {model.license_photo_url ? (
+                                              <a href={`${API_BASE_URL}${model.license_photo_url}`} target="_blank" rel="noopener noreferrer">
+                                                <img 
+                                                  src={`${API_BASE_URL}${model.license_photo_url}`} 
+                                                  alt="License Photo" 
+                                                  className="max-w-full h-auto rounded-md border"
+                                                />
+                                              </a>
+                                            ) : (
+                                              <div className="text-muted-foreground">No license photo available</div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="mt-4">
+                                        <h3 className="font-medium mb-2">Terms & Conditions</h3>
+                                        <div>
+                                          <span className="font-medium">Terms Accepted:</span> {
+                                            typeof model.terms_accepted === 'string'
+                                              ? JSON.parse(model.terms_accepted).every(Boolean) ? 'Yes' : 'No'
+                                              : Array.isArray(model.terms_accepted)
+                                                ? model.terms_accepted.every(Boolean) ? 'Yes' : 'No'
+                                                : 'Unknown'
+                                          }
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <DialogFooter className="mt-4">
+                                      <Button variant="outline" onClick={() => {
+                                        // Implement approval logic here
+                                        toast({
+                                          title: "Feature not implemented",
+                                          description: "Model approval functionality is not yet implemented",
+                                        });
+                                      }}>
+                                        Approve
+                                      </Button>
+                                      <Button variant="destructive" onClick={() => {
+                                        // Implement rejection logic here
+                                        toast({
+                                          title: "Feature not implemented",
+                                          description: "Model rejection functionality is not yet implemented",
+                                        });
+                                      }}>
+                                        Reject
+                                      </Button>
+                                    </DialogFooter>
+                                  </DialogContent>
+                                </Dialog>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1151,6 +1472,23 @@ export default function AdminDashboard() {
                     <Button variant="outline" size="sm" className="w-full">Update Plan</Button>
                   </div>
                   
+                  <div className="border rounded-lg p-4 border-dashed flex flex-col justify-center items-center text-center">
+                    <h3 className="text-lg font-semibold mb-2">Add New Plan</h3>
+                    <p className="text-muted-foreground text-sm mb-4">Create a new subscription plan for your users</p>
+                    <Button variant="outline">Add Plan</Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+        
+        {/* Add New Plan Section */}
+        <TabsContent value="plans">
+          <div className="grid gap-4">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="grid gap-6">
                   <div className="border rounded-lg p-4 border-dashed flex flex-col justify-center items-center text-center">
                     <h3 className="text-lg font-semibold mb-2">Add New Plan</h3>
                     <p className="text-muted-foreground text-sm mb-4">Create a new subscription plan for your users</p>

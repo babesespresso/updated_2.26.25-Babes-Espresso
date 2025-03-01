@@ -27,37 +27,48 @@ export class ErrorBoundary extends Component<Props, State> {
     };
   }
 
+  componentDidMount() {
+    // Register global recovery function
+    window.attemptRecovery = this.attemptRecovery;
+    
+    // Check for bypass flag
+    try {
+      const bypassRecovery = localStorage.getItem('bypass_recovery') === 'true';
+      if (bypassRecovery) {
+        console.log('Recovery bypass flag detected, disabling error boundary');
+        // Clear the error state if it was set
+        if (this.state.hasError) {
+          this.setState({ hasError: false, isExtensionError: false, recoveryAttempts: 0 });
+        }
+      }
+    } catch (e) {
+      // Ignore storage errors
+    }
+  }
+
   static getDerivedStateFromError(error: Error): State {
-    // Check if this is an extension error or lazy loading error
-    const isExtensionError = 
-      error.message?.includes('chrome-extension') ||
-      error.message?.includes('extension://') ||
-      error.message?.includes('moz-extension') ||
-      error.message?.includes('safari-extension') ||
-      error.message?.includes('safari-web-extension') ||
-      error.message?.includes('Failed to fetch dynamically imported module') ||
-      error.message?.includes('useUserExtension') ||
-      error.message?.includes('redacted') ||
-      error.message?.includes('localStorage') ||
-      error.message?.includes('primitive value') ||
-      error.message?.includes('Cannot convert object to primitive value') ||
-      error.message?.includes('SecurityError') ||
-      error.message?.includes('QuotaExceededError') ||
-      error.message?.includes('NotAllowedError') ||
-      error.message?.includes('Failed to execute') ||
-      error.message?.includes('The operation is insecure') ||
-      error.message?.includes('access storage') ||
-      error.message?.includes('null is not an object') ||
-      error.message?.includes('undefined is not an object') ||
-      error.message?.includes('QueryCache.ts') ||
-      error.message?.includes('MutationCache.ts') ||
-      error.message?.includes('useQuery') ||
-      error.message?.includes('useMutation') ||
-      error.stack?.includes('chrome-extension') ||
-      error.stack?.includes('extension://') ||
-      error.stack?.includes('moz-extension') ||
-      error.stack?.includes('safari-extension') ||
-      error.stack?.includes('useUserExtension');
+    // Check for bypass flag first
+    let bypassRecovery = false;
+    try {
+      bypassRecovery = localStorage.getItem('bypass_recovery') === 'true';
+    } catch (e) {
+      // Ignore storage errors
+    }
+    
+    // If bypass is enabled, don't trigger the error boundary
+    if (bypassRecovery) {
+      console.log('Error boundary bypassed due to bypass_recovery flag');
+      return {
+        hasError: false,
+        error,
+        errorInfo: null,
+        isExtensionError: false,
+        recoveryAttempts: 0
+      };
+    }
+    
+    // Temporarily disable extension error detection
+    const isExtensionError = false;
     
     // Update state so the next render will show the fallback UI.
     return { 
@@ -222,54 +233,10 @@ export class ErrorBoundary extends Component<Props, State> {
     const { hasError, error, isExtensionError, recoveryAttempts } = this.state;
     
     if (hasError) {
-      // If we have extension errors, show the fallback app after fewer attempts
-      // This ensures users see the helpful recovery UI sooner
-      if (isExtensionError && recoveryAttempts >= 2) {
-        return <FallbackApp />;
-      }
-      
-      // For extension errors we're still trying to recover from
-      if (isExtensionError) {
-        return (
-          <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4">
-            <div className="max-w-md w-full bg-gray-800 p-8 rounded-lg shadow-lg">
-              <h1 className="text-2xl font-bold mb-4">Recovering...</h1>
-              <p className="mb-4">
-                We've detected an issue with a browser extension or component loading. 
-                Attempting to recover automatically.
-              </p>
-              <div className="w-full bg-gray-700 rounded-full h-2.5 mb-4">
-                <div className="bg-blue-600 h-2.5 rounded-full animate-pulse" 
-                     style={{ width: `${(recoveryAttempts / 2) * 100}%` }}></div>
-              </div>
-              <p className="text-sm text-gray-400">
-                If this issue persists, try disabling browser extensions, 
-                especially React/Redux DevTools or similar development tools.
-              </p>
-            </div>
-          </div>
-        );
-      }
-      
-      // For other errors
-      return (
-        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4">
-          <div className="max-w-md w-full bg-gray-800 p-8 rounded-lg shadow-lg">
-            <h1 className="text-2xl font-bold mb-4">Something went wrong</h1>
-            <p className="mb-4 text-red-400">
-              {error?.message || "An unexpected error occurred"}
-            </p>
-            <button
-              onClick={() => this.setState({ hasError: false })}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Try again
-            </button>
-          </div>
-        </div>
-      );
+      // Bypass the extension error recovery screen
+      return <FallbackApp />;
     }
-
+    
     return this.props.children;
   }
 }
