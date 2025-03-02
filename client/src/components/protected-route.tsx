@@ -2,6 +2,7 @@ import { useEffect, ReactNode, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getQueryFn } from "../lib/queryClient";
 import { useToast } from "../hooks/use-toast";
+import { useLocation } from "react-router-dom";
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -11,8 +12,24 @@ interface ProtectedRouteProps {
 export default function ProtectedRoute({ children, allowedRoles = [] }: ProtectedRouteProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const location = useLocation();
   const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [authAttempts, setAuthAttempts] = useState(0);
+  
+  // Check if gallery bypass is enabled
+  const [bypassEnabled, setBypassEnabled] = useState(false);
+  
+  useEffect(() => {
+    try {
+      const bypass = localStorage.getItem('gallery_bypass_enabled');
+      if (bypass === 'true' && location.pathname === '/gallery') {
+        console.log('Gallery bypass enabled, skipping authentication check');
+        setBypassEnabled(true);
+      }
+    } catch (e) {
+      // Ignore storage errors
+    }
+  }, [location.pathname]);
   
   // Set a timeout to detect if we're stuck in loading
   useEffect(() => {
@@ -152,6 +169,12 @@ export default function ProtectedRoute({ children, allowedRoles = [] }: Protecte
     );
   }
 
+  // If bypass is enabled for gallery page, render children without authentication
+  if (bypassEnabled && location.pathname === '/gallery') {
+    console.log('Rendering gallery with bypass mode');
+    return <>{children}</>;
+  }
+  
   // User is authenticated and has required role, render children
   return <>{children}</>;
 }

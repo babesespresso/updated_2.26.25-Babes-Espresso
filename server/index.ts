@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
 import path from 'path';
+import cors from 'cors';
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { db, initializeDatabase } from "./db";
@@ -13,38 +14,28 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Custom CORS middleware to ensure credentials are properly handled
+// Configure CORS with the cors package
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow all origins for development
+    callback(null, true);
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'cache-control', 'pragma', 'Accept', 'X-Requested-With'],
+  credentials: true,
+  optionsSuccessStatus: 204,
+  maxAge: 86400 // 24 hours
+}));
+
+// Add explicit CORS headers to all responses as a backup
 app.use((req, res, next) => {
-  const allowedOrigins = [
-    'http://localhost:3001', 
-    'http://localhost:3002', 
-    'http://localhost:3003', 
-    'http://localhost:3004',
-    'http://localhost:3005',
-    'http://localhost:3006',
-    'http://localhost:3007',
-    'http://localhost:3008',
-    'http://localhost:3009',
-    'http://localhost:3010',
-    'http://localhost:3011',
-    'http://localhost:3012'
-  ];
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, cache-control, pragma, Accept, X-Requested-With');
   
-  const origin = req.headers.origin;
-  
-  // Check if the origin is in our allowed list
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, cache-control');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
-  
   next();
 });
 

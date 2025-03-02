@@ -111,7 +111,7 @@ export function GalleryItem({ image, type = 'gallery' }: GalleryItemProps) {
   return (
     <div className="relative group">
       <img
-        src={image.url.startsWith('http') ? image.url : `${API_BASE_URL}${image.url}`}
+        src={image.url.startsWith('http') ? image.url : image.url.startsWith('/') ? `${API_BASE_URL}${image.url}` : `${API_BASE_URL}/${image.url}`}
         alt={image.title}
         className="w-full h-48 object-cover rounded-lg"
         onError={(e) => {
@@ -122,47 +122,44 @@ export function GalleryItem({ image, type = 'gallery' }: GalleryItemProps) {
           const currentSrc = e.currentTarget.src;
           console.log('Image load error. Trying fallback from:', currentSrc);
           
-          if (!currentSrc.includes('?fallback=true')) {
-            // Try with a different base path
-            const imagePath = image.url.split('/').pop();
-            if (!imagePath) {
-              console.error('Could not extract image filename from URL:', image.url);
-              e.currentTarget.src = 'https://placehold.co/400x300?text=Image+Not+Found';
-              return;
-            }
-            
-            // First fallback: try with API_BASE_URL
-            const fallbackSrc = `${API_BASE_URL}/uploads/${imagePath}?fallback=true`;
-            console.log('Trying fallback URL:', fallbackSrc);
+          // Extract the filename from the URL
+          const imagePath = image.url.split('/').pop();
+          if (!imagePath) {
+            console.error('Could not extract image filename from URL:', image.url);
+            e.currentTarget.src = 'https://placehold.co/400x300?text=Image+Not+Found';
+            return;
+          }
+          
+          // Try different fallback paths in sequence
+          if (!currentSrc.includes('?fallback=')) {
+            // First fallback: direct path to client/public/uploads
+            const fallbackSrc = `/uploads/${imagePath}?fallback=1`;
+            console.log('Trying first fallback URL (direct public path):', fallbackSrc);
             e.currentTarget.src = fallbackSrc;
             return;
           }
           
-          if (!currentSrc.includes('?fallback=second')) {
-            // Second fallback: try with relative path
-            const imagePath = image.url.split('/').pop();
-            if (!imagePath) {
-              e.currentTarget.src = 'https://placehold.co/400x300?text=Image+Not+Found';
-              return;
-            }
-            
-            const secondFallbackSrc = `/uploads/${imagePath}?fallback=second`;
-            console.log('Trying second fallback URL:', secondFallbackSrc);
+          if (currentSrc.includes('?fallback=1')) {
+            // Second fallback: API_BASE_URL with uploads
+            const secondFallbackSrc = `${API_BASE_URL}/uploads/${imagePath}?fallback=2`;
+            console.log('Trying second fallback URL (API_BASE_URL):', secondFallbackSrc);
             e.currentTarget.src = secondFallbackSrc;
             return;
           }
           
-          if (!currentSrc.includes('?fallback=third')) {
-            // Third fallback: try with window.location.origin
-            const imagePath = image.url.split('/').pop();
-            if (!imagePath) {
-              e.currentTarget.src = 'https://placehold.co/400x300?text=Image+Not+Found';
-              return;
-            }
-            
-            const thirdFallbackSrc = `${window.location.origin}/uploads/${imagePath}?fallback=third`;
-            console.log('Trying third fallback URL:', thirdFallbackSrc);
+          if (currentSrc.includes('?fallback=2')) {
+            // Third fallback: window.location.origin with uploads
+            const thirdFallbackSrc = `${window.location.origin}/uploads/${imagePath}?fallback=3`;
+            console.log('Trying third fallback URL (window.location.origin):', thirdFallbackSrc);
             e.currentTarget.src = thirdFallbackSrc;
+            return;
+          }
+          
+          if (currentSrc.includes('?fallback=3')) {
+            // Fourth fallback: try the raw image name in case it's in the root
+            const fourthFallbackSrc = `/${imagePath}?fallback=4`;
+            console.log('Trying fourth fallback URL (root path):', fourthFallbackSrc);
+            e.currentTarget.src = fourthFallbackSrc;
             return;
           }
           

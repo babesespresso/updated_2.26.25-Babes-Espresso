@@ -76,7 +76,7 @@ export function setupAuth(app: Express) {
       secure: false, // Set to true in production with HTTPS
       maxAge: 24 * 60 * 60 * 1000,
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'none', // Changed from 'lax' to 'none' for cross-origin requests
       path: '/'
     },
     rolling: true,

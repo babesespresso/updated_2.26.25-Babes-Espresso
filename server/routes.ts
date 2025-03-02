@@ -127,6 +127,8 @@ const initializeDatabase = async () => {
 initializeDatabase();
 
 export async function registerRoutes(app: Express) {
+  console.log('Registering routes...');
+
   try {
     console.log('Starting route registration...');
 
@@ -554,9 +556,20 @@ export async function registerRoutes(app: Express) {
 
     // Session status endpoint
     app.get('/api/auth/session', (req, res) => {
+      // Set CORS headers explicitly for this endpoint
+      res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, cache-control, pragma, Accept, X-Requested-With');
+      
+      if (req.method === 'OPTIONS') {
+        return res.status(204).end();
+      }
+      
       if (!req.session) {
         return res.json({ authenticated: false });
       }
+      
       res.json({ 
         authenticated: req.isAuthenticated(),
         user: req.user ? { id: req.user.id, email: req.user.email } : null
@@ -887,8 +900,7 @@ export async function registerRoutes(app: Express) {
         console.log('File upload successful:', {
           filename: req.file.filename,
           size: req.file.size,
-          mimetype: req.file.mimetype,
-          path: req.file.path
+          mimetype: req.file.mimetype
         });
         
         // Skip any image processing for the test endpoint
@@ -920,7 +932,10 @@ export async function registerRoutes(app: Express) {
         const { id } = req.params;
         const { isPremium } = req.body;
         
-        console.log(`Updating premium status for gallery item ${id} to ${isPremium}`);
+        // Convert isPremium to boolean properly
+        const isPremiumBool = isPremium === true || isPremium === 'true' ? true : false;
+        
+        console.log(`Updating premium status for gallery item ${id} to ${isPremiumBool}`);
         
         // Validate the ID
         if (!id || isNaN(Number(id))) {
@@ -931,7 +946,7 @@ export async function registerRoutes(app: Express) {
         
         // Update the gallery item
         const result = await db.update(gallery)
-          .set({ is_premium: isPremium })
+          .set({ is_premium: isPremiumBool })
           .where(eq(gallery.id, Number(id)))
           .returning();
         
@@ -1088,453 +1103,8 @@ export async function registerRoutes(app: Express) {
     });
 
     // Combined endpoint for gallery and featured content
-    app.get("/api/gallery", async (req, res) => {
-      try {
-        const type = req.query.type as string || 'gallery';
-        
-        // Validate query parameters
-        if (!['gallery', 'featured', undefined].includes(type)) {
-          return res.status(400).json({
-            message: 'Invalid gallery type',
-            details: 'Type must be either "gallery" or "featured"'
-          });
-        }
-
-        // Parse premium filter
-        const isPremium = req.query.premium === 'true' ? true : req.query.premium === 'false' ? false : undefined;
-        const filterByPremium = req.query.premium !== undefined;
-        
-        console.log('Gallery fetch request:', { 
-          type, 
-          premium: req.query.premium,
-          isPremium,
-          filterByPremium,
-          query: req.query
-        });
-
-        // Use direct SQLite connection for reliability
-        const dbPath = path.resolve(process.cwd(), 'babes_espresso.db');
-        console.log('Opening SQLite database at:', dbPath);
-        
-        const db = await open({
-          filename: dbPath,
-          driver: sqlite3.Database
-        });
-        
-        // Enable verbose logging
-        if (process.env.NODE_ENV !== 'production') {
-          db.on('trace', (sql) => {
-            console.log(`[SQL] ${sql}`);
-          });
-        }
-        
-        // Check if models table exists and create if not
-        const tableExists = await db.get(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='models' LIMIT 1"
-        );
-        
-        if (!tableExists) {
-          console.log('Models table does not exist, creating it now...');
-          
-          // Create models table
-          await db.run(`
-            CREATE TABLE IF NOT EXISTS models (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              first_name TEXT NOT NULL,
-              last_name TEXT NOT NULL,
-              email TEXT NOT NULL UNIQUE,
-              phone TEXT NOT NULL,
-              date_of_birth TEXT NOT NULL,
-              social_platforms TEXT NOT NULL,
-              social_handles TEXT NOT NULL,
-              only_fans_link TEXT,
-              body_photo_url TEXT NOT NULL,
-              license_photo_url TEXT NOT NULL,
-              terms_accepted TEXT NOT NULL,
-              created_at DATETIME NOT NULL
-            )
-          `);
-        }
-        
-        console.log('Models table created successfully');
-        
-        // Check if gallery table exists and create if not
-        const galleryTableExists = await db.get(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='gallery' LIMIT 1"
-        );
-        
-        if (!galleryTableExists) {
-          console.log('Gallery table does not exist, creating it now...');
-          
-          // Create gallery table
-          await db.run(`
-            CREATE TABLE IF NOT EXISTS gallery (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              url TEXT NOT NULL,
-              title TEXT NOT NULL,
-              type TEXT NOT NULL DEFAULT 'gallery',
-              content_rating TEXT DEFAULT 'sfw',
-              is_premium INTEGER DEFAULT 0,
-              created_at DATETIME NOT NULL,
-              tags TEXT DEFAULT '[]',
-              instagram TEXT,
-              tiktok TEXT,
-              twitter TEXT,
-              onlyfans TEXT,
-              description TEXT
-            )
-          `);
-        }
-        
-        console.log('Gallery table created successfully');
-        
-        // Check if we need to add sample data
-        const checkEmpty = await db.get('SELECT COUNT(*) as count FROM gallery');
-        
-        if (checkEmpty.count === 0) {
-          console.log('Gallery is empty, will add sample data');
-          await db.run(`
-            INSERT INTO gallery (url, title, type, content_rating, is_premium, created_at, tags)
-            VALUES ('/uploads/sample1.jpg', 'Sample Gallery Image 1', 'gallery', 'sfw', 0, DATETIME('now'), '[]'),
-                   ('/uploads/sample2.jpg', 'Sample Gallery Image 2', 'gallery', 'sfw', 0, DATETIME('now'), '[]'),
-                   ('/uploads/sample3.jpg', 'Featured Sample', 'featured', 'sfw', 0, DATETIME('now'), '[]')
-          `);
-        } else {
-          console.log(`Gallery has ${checkEmpty.count} items`);
-        }
-        
-        // Build query based on filters
-        let query = 'SELECT * FROM gallery';
-        const params: any[] = [];
-        const conditions: string[] = [];
-
-        if (type) {
-          conditions.push('type = ?');
-          params.push(type);
-        }
-
-        if (filterByPremium) {
-          conditions.push('is_premium = ?');
-          params.push(isPremium ? 1 : 0);
-        }
-
-        if (conditions.length > 0) {
-          query += ' WHERE ' + conditions.join(' AND ');
-        }
-
-        query += ' ORDER BY created_at DESC';
-        
-        console.log('Executing gallery query:', query, params);
-
-        // Execute the query
-        const items = await db.all(query, params);
-        
-        // Process items to ensure proper format for client
-        const processedItems = items.map(item => ({
-          id: item.id,
-          url: item.url,
-          title: item.title,
-          type: item.type,
-          contentRating: item.content_rating || 'sfw',
-          isPremium: !!item.is_premium,
-          createdAt: item.created_at,
-          tags: typeof item.tags === 'string' ? JSON.parse(item.tags) : (item.tags || []),
-          instagram: item.instagram,
-          tiktok: item.tiktok,
-          twitter: item.twitter,
-          onlyfans: item.onlyfans,
-          description: item.description
-        }));
-
-        console.log(`Returning ${processedItems.length} gallery items`);
-        
-        // Close the database connection
-        await db.close();
-        
-        return res.json(processedItems);
-      } catch (error) {
-        console.error('Failed to fetch gallery:', error);
-        return res.status(500).json({ 
-          message: 'Failed to fetch gallery items',
-          error: error instanceof Error ? error.message : 'Unknown error',
-          code: 'GALLERY_FETCH_ERROR'
-        });
-      }
-    });
-
-    app.delete("/api/gallery/:id", requireAuth, async (req, res) => {
-      let error: unknown;
-      try {
-        const galleryId = parseInt(req.params.id);
-        if (isNaN(galleryId)) {
-          return res.status(400).json({ message: "Invalid gallery ID" });
-        }
-        
-        console.log('Attempting to delete gallery content:', galleryId);
-        
-        // First get the item to find its URL
-        const [itemToDelete] = await db.select().from(gallery).where(eq(gallery.id, galleryId));
-        
-        if (!itemToDelete) {
-          return res.status(404).json({ message: "Gallery item not found" });
-        }
-        
-        // Then delete it from the database
-        const result = await db.delete(gallery).where(eq(gallery.id, galleryId)).returning();
-
-        // If we have a URL, try to delete the file
-        if (result[0]?.url) {
-          try {
-            // Get the filename from the URL
-            const filename = path.basename(result[0].url);
-            
-            // Try to delete from both upload directories
-            const serverFilePath = path.join(uploadDir, filename);
-            const clientFilePath = path.join(publicUploadsDir, filename);
-            
-            console.log('Attempting to delete files at paths:', {
-              serverFilePath,
-              clientFilePath
-            });
-            
-            // Delete from server uploads directory
-            if (fs.existsSync(serverFilePath)) {
-              fs.unlinkSync(serverFilePath);
-              console.log('Successfully deleted file from server:', serverFilePath);
-            } else {
-              console.warn('File not found for deletion in server uploads:', serverFilePath);
-            }
-            
-            // Delete from client public uploads directory
-            if (fs.existsSync(clientFilePath)) {
-              fs.unlinkSync(clientFilePath);
-              console.log('Successfully deleted file from client:', clientFilePath);
-            } else {
-              console.warn('File not found for deletion in client uploads:', clientFilePath);
-            }
-          } catch (fileError) {
-            console.error('Error deleting file:', fileError);
-            // Continue with the response even if file deletion fails
-          }
-        }
-
-        console.log('Successfully deleted gallery content:', result[0]);
-        res.json({ message: "Content deleted", deletedItem: result[0] });
-      } catch (err) {
-        error = err;
-        console.error('Failed to delete content:', error);
-        res.status(500).json({ 
-          message: "Failed to delete content",
-          error: error instanceof Error ? error.message : "Unknown error"
-        });
-      }
-    });
-
-    app.get("/api/models", async (req, res) => {
-      console.log('Models API endpoint called - returning hardcoded data');
-      
-      try {
-        // Return hardcoded model data
-        const hardcodedModels = [
-          {
-            "id": 1,
-            "first_name": "John",
-            "last_name": "Reinecke",
-            "email": "admin@babesespresso.com",
-            "phone": "7029790302",
-            "date_of_birth": "2021-12-12",
-            "alias_name": "testter",
-            "social_platforms": "[\"Instagram\",\"TikTok\"]",
-            "social_handles": "test",
-            "only_fans_link": "www.babes.com",
-            "body_photo_url": "/uploads/bodyPhoto-1740617667738-183397545.jpeg",
-            "license_photo_url": "/uploads/licensePhoto-1740617667741-547661354.jpeg",
-            "terms_accepted": "[true,true]"
-          },
-          {
-            "id": 2,
-            "first_name": "Jane",
-            "last_name": "Doe",
-            "email": "jane@example.com",
-            "phone": "5551234567",
-            "date_of_birth": "1990-01-01",
-            "alias_name": "JD",
-            "social_platforms": "[\"Instagram\",\"Twitter\"]",
-            "social_handles": "janedoe",
-            "only_fans_link": "www.example.com",
-            "body_photo_url": "/uploads/bodyPhoto-sample.jpeg",
-            "license_photo_url": "/uploads/licensePhoto-sample.jpeg",
-            "terms_accepted": "[true,true]"
-          }
-        ];
-        
-        console.log(`Returning ${hardcodedModels.length} hardcoded model applications`);
-        return res.json(hardcodedModels);
-      } catch (error) {
-        console.error('Error in /api/models endpoint:', error);
-        return res.status(500).json({ 
-          error: 'Failed to retrieve model data',
-          message: error instanceof Error ? error.message : 'Unknown error'
-        });
-      }
-    });
-
-    app.get("/api/models-test", async (req, res) => {
-      console.log("TEST ENDPOINT HIT");
-      return res.json([
-        {id: 1, first_name: "Test", last_name: "User", email: "test@example.com"}
-      ]);
-    });
-
-    app.post("/api/model-application", upload.fields([
-      { name: 'bodyPhoto', maxCount: 1 },
-      { name: 'licensePhoto', maxCount: 1 }
-    ]), async (req, res) => {
-      console.log('Model application submission endpoint called');
-      
-      try {
-        // Validate required fields
-        const requiredFields = [
-          'firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'socialPlatforms'
-        ];
-        
-        for (const field of requiredFields) {
-          if (!req.body[field]) {
-            return res.status(400).json({ message: `Missing required field: ${field}` });
-          }
-        }
-        
-        // Validate file uploads
-        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-        
-        if (!files.bodyPhoto || !files.bodyPhoto[0]) {
-          return res.status(400).json({ message: 'Body photo is required' });
-        }
-        
-        if (!files.licensePhoto || !files.licensePhoto[0]) {
-          return res.status(400).json({ message: 'License photo is required' });
-        }
-        
-        // Get file paths
-        const bodyPhotoPath = `/uploads/${files.bodyPhoto[0].filename}`;
-        const licensePhotoPath = `/uploads/${files.licensePhoto[0].filename}`;
-        
-        // Parse terms accepted
-        let termsAccepted;
-        try {
-          termsAccepted = req.body.termsAccepted ? JSON.stringify(req.body.termsAccepted) : '{"agreed": false}';
-        } catch (e) {
-          termsAccepted = '{"agreed": false}';
-        }
-        
-        // Parse social platforms
-        let socialPlatforms;
-        try {
-          socialPlatforms = req.body.socialPlatforms ? JSON.stringify(JSON.parse(req.body.socialPlatforms)) : '[]';
-        } catch (e) {
-          socialPlatforms = JSON.stringify([req.body.socialPlatforms]);
-        }
-        
-        // Create a direct connection to the SQLite database
-        const db = await open({
-          filename: 'sqlite.db',
-          driver: sqlite3.Database
-        });
-        
-        // Enable verbose logging
-        if (process.env.NODE_ENV !== 'production') {
-          db.on('trace', (sql) => {
-            console.log(`[SQL] ${sql}`);
-          });
-        }
-        
-        // Check if models table exists and create if not
-        const tableExists = await db.get(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='models' LIMIT 1"
-        );
-        
-        if (!tableExists) {
-          console.log('Models table does not exist, creating it now...');
-          
-          // Create models table
-          await db.run(`
-            CREATE TABLE IF NOT EXISTS models (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              first_name TEXT NOT NULL,
-              last_name TEXT NOT NULL,
-              email TEXT NOT NULL UNIQUE,
-              phone TEXT NOT NULL,
-              date_of_birth TEXT NOT NULL,
-              social_platforms TEXT NOT NULL,
-              social_handles TEXT NOT NULL,
-              only_fans_link TEXT,
-              body_photo_url TEXT NOT NULL,
-              license_photo_url TEXT NOT NULL,
-              terms_accepted TEXT NOT NULL,
-              created_at DATETIME NOT NULL
-            )
-          `);
-        }
-        
-        console.log('Models table created successfully');
-        
-        // Insert model application
-        const params = [
-          req.body.firstName,
-          req.body.lastName,
-          req.body.email,
-          req.body.phone,
-          req.body.dateOfBirth,
-          req.body.aliasName || null,
-          socialPlatforms,
-          req.body.socialHandles || null,
-          req.body.onlyFansLink || null,
-          bodyPhotoPath,
-          licensePhotoPath,
-          termsAccepted
-        ];
-        
-        await db.run(`
-          INSERT INTO models (
-            first_name, last_name, email, phone, date_of_birth, 
-            alias_name, social_platforms, social_handles, only_fans_link,
-            body_photo_url, license_photo_url, terms_accepted
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, params);
-        
-        const modelId = await db.lastID;
-        console.log(`Model application submitted successfully with ID: ${modelId}`);
-        
-        // Close the database connection
-        await db.close();
-        
-        return res.status(201).json({ 
-          message: "Model application submitted successfully",
-          id: modelId
-        });
-      } catch (error) {
-        console.error('Error in model application submission endpoint:', error);
-        return res.status(500).json({ 
-          message: "Failed to submit model application",
-          details: error instanceof Error ? error.message : 'Unknown error'
-        });
-      }
-    });
-
-    // Global error handler
-    app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-      console.error('Unhandled error:', err);
-      res.status(500).json({
-        message: "Internal server error",
-        error: process.env.NODE_ENV === 'development' ? err.message : 'An unexpected error occurred'
-      });
-    });
-
-    console.log('Routes registered successfully');
-    const httpServer = createServer(app);
-    return httpServer;
   } catch (error) {
-    console.error('Failed to register routes:', error);
-    throw error;
+    console.error('Error during route registration:', error);
+    throw error; // Re-throw to ensure the server fails on startup
   }
 }

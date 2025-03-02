@@ -3,8 +3,14 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
 import { Toaster } from './components/ui/toaster'
+import { patchUserExtension } from './lib/extension-patcher'
+import { overrideUserExtension } from './lib/extension-override'
+import { applyScriptBlocker } from './lib/script-blocker'
+import { logDiagnostics } from './lib/extension-diagnostics'
+import { GlobalErrorBoundary } from './components/GlobalErrorBoundary'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import FallbackApp from './components/FallbackApp'
+import ExtensionDiagnostics from './components/ExtensionDiagnostics'
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -23,11 +29,95 @@ const AboutPage = React.lazy(() => import('./pages/about'))
 import ProtectedRoute from './components/protected-route'
 // Import BypassRoute for emergency access
 import BypassRoute from './components/bypass-route'
+// Import GalleryBypass for handling gallery authentication issues
+import { GalleryBypass } from './components/gallery-bypass'
+
+// Apply script blocker, extension patcher, and override at the earliest possible moment
+if (typeof window !== 'undefined') {
+  try {
+    console.log('Applying script blocker, extension patcher and override from App.tsx', { timestamp: new Date().toISOString() });
+    // Apply script blocker first to prevent problematic scripts from loading
+    applyScriptBlocker();
+    // Then apply the extension patcher and override
+    patchUserExtension();
+    overrideUserExtension();
+    // Log diagnostics
+    logDiagnostics();
+    
+    // Capture all unhandled promise rejections
+    window.addEventListener('unhandledrejection', (event) => {
+      console.warn('Unhandled promise rejection caught by App.tsx:', event.reason);
+      
+      // Check if this is the redacted error
+      if (event.reason && event.reason.message && event.reason.message.includes('redacted')) {
+        console.log('Caught redacted error in unhandledrejection event');
+        sessionStorage.setItem('user_extension_error', 'true');
+        event.preventDefault(); // Prevent the error from propagating
+      }
+    });
+    
+    // Add a global error handler
+    window.onerror = function(message, source, lineno, colno, error) {
+      console.warn('Global error caught by App.tsx:', { message, source, lineno, colno });
+      
+      // Check if this is the redacted error
+      if (message && typeof message === 'string' && message.includes('redacted')) {
+        console.log('Caught redacted error in window.onerror');
+        sessionStorage.setItem('user_extension_error', 'true');
+        return true; // Prevent default error handling
+      }
+      
+      return false; // Let other handlers run
+    };
+    
+  } catch (e) {
+    console.error('Failed to apply extension patcher/override in App.tsx:', e);
+  }
+}
 
 function App() {
   const [hasError, setHasError] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
   const [isStuck, setIsStuck] = useState(false);
+  const [patchApplied, setPatchApplied] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  
+  // Apply script blocker, extension patcher, and override in the App component
+  useEffect(() => {
+    if (!patchApplied) {
+      try {
+        console.log('Applying script blocker, extension patcher and override from App component', { timestamp: new Date().toISOString() });
+        // Apply script blocker first
+        applyScriptBlocker();
+        // Then apply the extension patcher and override
+        patchUserExtension();
+        overrideUserExtension();
+        setPatchApplied(true);
+        
+        // Force a refresh of the query client to ensure it uses our patched fetch
+        queryClient.clear();
+        
+        // Log diagnostics
+        logDiagnostics();
+        
+        // Check if we should show diagnostics based on blocked scripts
+        try {
+          const blockedScript = sessionStorage.getItem('blocked_extension_script');
+          if (blockedScript) {
+            console.log('Extension conflicts detected, showing diagnostics panel');
+            setShowDiagnostics(true);
+          }
+        } catch (e) {
+          // Ignore storage errors
+        }
+        
+        // Log that we've successfully applied the patches
+        console.log('Successfully applied patches in App component', { timestamp: new Date().toISOString() });
+      } catch (e) {
+        console.error('Failed to apply extension patcher/override in App component:', e);
+      }
+    }
+  }, [patchApplied]);
   
   // Global error handler for the entire app
   useEffect(() => {
@@ -48,11 +138,19 @@ function App() {
         errorMessage.includes('moz-extension://') ||
         errorStack?.includes('moz-extension://') ||
         errorMessage.includes('safari-extension://') ||
-        errorStack?.includes('safari-extension://');
+        errorStack?.includes('safari-extension://') ||
+        // Also check for useUserExtension errors
+        errorMessage.includes('useUserExtension') ||
+        errorStack?.includes('useUserExtension') ||
+        // Check for redacted errors
+        errorMessage.includes('redacted');
       
       if (isExtensionError) {
         // Count these errors
         setErrorCount(prev => prev + 1);
+        
+        // Show diagnostics panel when extension errors are detected
+        setShowDiagnostics(true);
         
         // Track extension errors
         try {
@@ -65,6 +163,9 @@ function App() {
             stack: errorStack?.substring(0, 500) || '',
             timestamp: new Date().toISOString()
           }));
+          
+          // Log diagnostics when errors occur
+          logDiagnostics();
         } catch (e) {
           // Ignore storage errors
         }
@@ -262,11 +363,25 @@ function App() {
     </div>
   );
 
+  // Add keyboard shortcut to toggle diagnostics panel
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl+Shift+D to toggle diagnostics panel
+      if (event.ctrlKey && event.shiftKey && event.key === 'D') {
+        setShowDiagnostics(prev => !prev);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <Suspense fallback={<LoadingFallback />}>
+    <GlobalErrorBoundary>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <Suspense fallback={<LoadingFallback />}>
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/auth" element={<AuthPage />} />
@@ -278,11 +393,13 @@ function App() {
                 </BypassRoute>
               } />
               <Route path="/gallery" element={
-                <ProtectedRoute>
-                  <Suspense fallback={<LoadingFallback />}>
-                    <GalleryPage />
-                  </Suspense>
-                </ProtectedRoute>
+                <GalleryBypass>
+                  <ProtectedRoute>
+                    <Suspense fallback={<LoadingFallback />}>
+                      <GalleryPage />
+                    </Suspense>
+                  </ProtectedRoute>
+                </GalleryBypass>
               } />
               <Route path="/premium" element={
                 <Suspense fallback={<LoadingFallback />}>
@@ -316,8 +433,12 @@ function App() {
         </BrowserRouter>
         <Toaster />
         <ToastContainer />
+        {showDiagnostics && (
+          <ExtensionDiagnostics onClose={() => setShowDiagnostics(false)} />
+        )}
       </QueryClientProvider>
-    </ErrorBoundary>
+      </ErrorBoundary>
+    </GlobalErrorBoundary>
   )
 }
 

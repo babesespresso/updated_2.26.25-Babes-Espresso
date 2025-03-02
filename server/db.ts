@@ -7,14 +7,23 @@ import fs from 'fs';
 
 // Ensure the database directory exists
 const dbDir = path.dirname('babes_espresso.db');
+console.log('Database directory:', dbDir);
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
 let sqlite: Database.Database;
 try {
+  const dbFilePath = path.join(process.cwd(), 'babes_espresso.db');
+  console.log('Database file path:', dbFilePath);
+  if (!fs.existsSync(dbFilePath)) {
+    fs.writeFileSync(dbFilePath, '');
+    console.log('Created database file:', dbFilePath);
+  } else {
+    console.log('Database file already exists:', dbFilePath);
+  }
   // Improved SQLite connection with better options
-  sqlite = new Database('babes_espresso.db', { 
+  sqlite = new Database(dbFilePath, { 
     verbose: process.env.NODE_ENV === 'development' ? console.log : undefined,
     fileMustExist: false,
     timeout: 5000, // 5 seconds
